@@ -5,7 +5,7 @@
 - [ ] Phase 1 spike passed on real hardware, outcome recorded in [SPIKE.md](SPIKE.md)
 - [ ] Full on-device matrix in [TESTING.md](TESTING.md) passed, especially test 6 (off-screen)
 - [ ] `manifest.xml` version is `1.0.0`
-- [ ] Permissions are **only** `Attention` — do not add `Positioning`, `FitContributor`, or anything else this app doesn't use; extra permissions slow review and cost installs
+- [ ] `<iq:permissions/>` is **empty** — `Toybox.Attention` needs no permission (declaring `Attention` is a hard compile error, confirmed against SDK 9.2.0), and nothing else here does either
 - [ ] Products list is `fr165` + `fr165m` only
 - [ ] Build with `-w` and fix every warning
 - [ ] Developer key backed up somewhere off this machine
@@ -13,11 +13,10 @@
 ## Build the release package
 
 ```bash
-cd /d/Projects/garmin-workout-metronome
-monkeyc -e -f monkey.jungle -o bin/WorkoutMetronome.iq -y /d/Projects/.keys/workout_metronome.der -w -r
+tools/build.sh release
 ```
 
-`-e` exports the `.iq` bundle (all devices at once — this is the file you upload, not a `.prg`), `-r` builds in release mode. In VS Code: **Monkey C: Export Project**.
+That runs `monkeyc -e ... -r`: `-e` exports the `.iq` bundle (all devices at once - this is the file you upload, not a `.prg`), `-r` builds in release mode. In VS Code: **Monkey C: Export Project**.
 
 ## Assets to prepare
 

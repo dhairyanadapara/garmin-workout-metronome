@@ -3,11 +3,10 @@
 ## Unit tests
 
 ```bash
-monkeyc -f monkey.jungle -o bin/test.prg -y /d/Projects/.keys/workout_metronome.der -d fr165 -w --unit-test
-monkeydo bin/test.prg fr165 -t
+tools/build.sh test
 ```
 
-Eight tests in [`source/Tests.mc`](../source/Tests.mc), all on `BeatScheduler`. The one that matters most is `testPhaseCarriesAcrossWindows` — it fails if anyone ever "simplifies" the scheduler by restarting the phase each tick, which is the change that would silently reintroduce a once-per-second stutter.
+Eight tests in [`source/Tests.mc`](../source/Tests.mc), all on `BeatScheduler`. **Status: all 8 pass** against SDK 9.2.0. The one that matters most is `testPhaseCarriesAcrossWindows` — it fails if anyone ever "simplifies" the scheduler by restarting the phase each tick, which is the change that would silently reintroduce a once-per-second stutter.
 
 `testNoDriftOverAnHour` is the regression guard on timing accuracy.
 

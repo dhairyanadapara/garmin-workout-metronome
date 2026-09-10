@@ -12,9 +12,7 @@
             <iq:product id="fr165"/>
             <iq:product id="fr165m"/>
         </iq:products>
-        <iq:permissions>
-            <iq:uses-permission id="Attention"/>
-        </iq:permissions>
+        <iq:permissions/>
         <iq:languages>
             <iq:language>eng</iq:language>
         </iq:languages>

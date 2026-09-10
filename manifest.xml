@@ -17,11 +17,11 @@
             <iq:product id="fr165"/>
             <iq:product id="fr165m"/>
         </iq:products>
-        <!-- Attention is the ONLY permission needed. Do not add others:
-             extra permissions slow store review and scare users. -->
-        <iq:permissions>
-            <iq:uses-permission id="Attention"/>
-        </iq:permissions>
+        <!-- Intentionally EMPTY. Toybox.Attention needs no permission
+             (see the SDK's own samples/Attention/manifest.xml), and declaring
+             one is a hard compile error. This app needs nothing else either:
+             no Positioning, no FitContributor, no Background. -->
+        <iq:permissions/>
         <iq:languages>
             <iq:language>eng</iq:language>
         </iq:languages>

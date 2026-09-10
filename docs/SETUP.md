@@ -2,33 +2,35 @@
 
 Nothing here can be scripted: the SDK Manager needs a Garmin account login and a GUI installer. Budget about an hour, most of it downloads.
 
-## What this machine already has
+## Current state of this machine
 
 | | |
 |---|---|
-| Java | **1.8.0_401** — ⚠️ too old, see below |
-| OpenSSL | 1.1.1t ✅ |
-| Git | 2.40.1 ✅ |
-| Connect IQ SDK | ❌ not installed |
+| Java 17 | OK - `C:\Program Files\Microsoft\jdk-17.0.8.7-hotspot` (`JAVA_HOME` points here) |
+| Connect IQ SDK | OK - **9.2.0** (2026-06-09), marked active |
+| OpenSSL / Git | OK |
+| Developer key | OK - `D:\Projects\.keys\workout_metronome.der` |
+| **FR165 device profile** | **MISSING - this is the remaining blocker** |
 
-## 1. Java 17+
+## 1. Java 17 - the PATH trap
 
-The Connect IQ SDK 7.x compiler needs a modern JDK; Java 8 will fail with obscure class-version errors. Install **Temurin 17 (or 21) JDK** from <https://adoptium.net>, then confirm the *first* Java on PATH is the new one:
+Java 17 is installed, but **Java 1.8 is still first on `PATH`**, so a bare `java -version` reports 1.8 and `monkeyc` can fail with obscure class-version errors.
+
+`tools/build.sh` pins `JAVA_HOME` for you, so prefer it over calling `monkeyc` directly. If you want the shell fixed globally, move the JDK 17 `bin` ahead of the Java 8 entry in the system PATH (leave Java 8 installed - something else is pulling it in).
+
+## 2. Install the FR165 device profiles
+
+Device profiles are separate downloads from the SDK, and no Forerunner is installed yet. Without them, `-d fr165` cannot build or simulate.
+
+1. Open the **Connect IQ SDK Manager**
+2. **Devices** tab, tick **Forerunner 165** and **Forerunner 165 Music**
+3. Let them download
+
+Verify:
 
 ```bash
-java -version
+ls ~/AppData/Roaming/Garmin/ConnectIQ/Devices | grep fr165
 ```
-
-If it still reports 1.8, put the new JDK's `bin` ahead of the old entry in the system PATH (the old Java 8 is probably pulled in by another app — leave it installed, just reorder).
-
-## 2. Connect IQ SDK Manager
-
-1. Sign in / create a free account at <https://developer.garmin.com/connect-iq/sdk/>
-2. Download the **SDK Manager for Windows** and run it.
-3. In the SDK tab: install the **latest 7.x SDK** and mark it *active*.
-4. In the Devices tab: install **Forerunner 165** and **Forerunner 165 Music**.
-
-Devices are separate downloads from the SDK. Without them, `-d fr165` fails.
 
 ## 3. VS Code
 
@@ -48,28 +50,30 @@ openssl pkcs8 -topk8 -inform PEM -outform DER \
 
 It lives outside the repo on purpose, and `.gitignore` blocks `*.der` / `*.pem` as a second line of defence.
 
-Point VS Code at it: **Settings → Monkey C → Developer Key Path** → `D:\Projects\.keys\workout_metronome.der`
+This key is **already generated** - the block above is only for recreating it. Point VS Code at it: **Settings > Monkey C > Developer Key Path** > `D:\Projects\.keys\workout_metronome.der`
 
-## 5. First build
-
-Open `D:\Projects\garmin-workout-metronome` in VS Code and run **Monkey C: Build for Device** (or `Ctrl+F5` to run in the simulator). Pick `fr165`.
-
-Command line equivalent:
+## 5. Build
 
 ```bash
-monkeyc -f monkey.jungle -o bin/WorkoutMetronome.prg -y /d/Projects/.keys/workout_metronome.der -d fr165 -w
+tools/build.sh device      # app -> bin/WorkoutMetronome.prg
+tools/build.sh test        # build + run the unit tests in the simulator
+tools/build.sh spike       # the Phase 1 capability probe
+tools/build.sh release     # signed .iq bundle for the store
 ```
 
-`-w` turns on warnings — leave it on, Monkey C's type checker catches a lot at this level.
+All default to `fr165`; pass a device as the second argument to override. The script pins `JAVA_HOME`, reads whichever SDK is currently marked active, and refuses to build with a clear message if the device profile is not installed.
 
-Run the unit tests:
+In VS Code, **Monkey C: Build for Device** / `Ctrl+F5` work too.
 
-```bash
-monkeyc -f monkey.jungle -o bin/test.prg -y /d/Projects/.keys/workout_metronome.der -d fr165 -w --unit-test
-monkeydo bin/test.prg fr165 -t
-```
+### Already verified against SDK 9.2.0
 
-All eight scheduler tests should pass. The maths behind them was already verified independently in Python (≤1 ms per-beat deviation, ≤1 beat drift/hour), so a failure here means a Monkey C porting problem, not a logic problem.
+Built for an installed device profile (`fenix6`, standing in until FR165 lands):
+
+- App, unit-test and spike targets all **BUILD SUCCESSFUL** with `-w`
+- All **8 scheduler unit tests PASS** in the Monkey C VM
+- `testNoDriftOverAnHour` reported `beats=10381 expected=10380 error=1`, matching the independent Python model exactly
+
+So the code compiles and the timing maths is correct. What remains unproven is purely hardware behaviour, which is Phase 1.
 
 ## 6. Sideload to the watch
 
@@ -82,10 +86,13 @@ Settings live in **Garmin Connect Mobile → your device → Activities & App Ma
 
 ## Exit criteria
 
-- [ ] `java -version` reports 17+
-- [ ] `monkeyc` builds `bin/WorkoutMetronome.prg` with no warnings
-- [ ] `monkeydo` runs the unit tests green
-- [ ] The field renders in the FR165 simulator
+- [x] Java 17 available; SDK 9.2.0 active
+- [x] Developer key generated and backed up
+- [x] App, tests and spike all build clean with `-w`
+- [x] All 8 unit tests pass
+- [ ] **FR165 + FR165 Music device profiles installed** <- blocker
+- [ ] `tools/build.sh device` succeeds for `fr165`
+- [ ] The field renders correctly in the FR165 simulator at every field size
 - [ ] The field appears in the data-screen picker on the real watch
 
 Then go to [SPIKE.md](SPIKE.md) — **do not skip it.**

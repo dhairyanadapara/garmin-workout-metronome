@@ -204,7 +204,7 @@ class Cue {
         }
     }
 
-    private function safePlayTone(tone as Number) as Void {
+    private function safePlayTone(tone as Attention.Tone) as Void {
         try {
             Attention.playTone(tone);
         } catch (e) {

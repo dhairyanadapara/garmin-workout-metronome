@@ -11,11 +11,10 @@ The docs say `playTone` accepts `:toneProfile` and that data fields may call it.
 ## Build and load
 
 ```bash
-cd /d/Projects/garmin-workout-metronome/spike
-monkeyc -f monkey.jungle -o bin/spike.prg -y /d/Projects/.keys/workout_metronome.der -d fr165 -w
+tools/build.sh spike
 ```
 
-Copy `bin\spike.prg` to `GARMIN\APPS\` on the watch, then add **Metronome Spike** to a run data screen.
+Copy `spike\bin\spike.prg` to `GARMIN\APPS\` on the watch, then add **Metronome Spike** to a run data screen.
 
 Before starting, on the watch: **Settings → System → Sound and Vibe** — turn tones **on** and set vibration **on**. The spike shows both flags on screen (`snd`/`vib`) so you can confirm.
 
