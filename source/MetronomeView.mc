@@ -1,4 +1,5 @@
 import Toybox.Activity;
+import Toybox.System;
 import Toybox.Graphics;
 import Toybox.Lang;
 import Toybox.WatchUi;
@@ -51,9 +52,13 @@ class MetronomeView extends WatchUi.DataField {
 
     //! Once per second, for the whole activity.
     public function compute(info as Activity.Info) as Void {
+        // No duplicate-tick guard is needed. compute() fires twice 47ms apart
+        // at activity start, but BeatScheduler.schedule() is idempotent, so
+        // the second call simply re-queues the same future beats.
+        var now = System.getTimer();
         var timerState = timerStateOf(info);
 
-        handleTimerEdges(timerState);
+        handleTimerEdges(timerState, now);
 
         _liveCadence = (info has :currentCadence) ? info.currentCadence : null;
 
@@ -67,10 +72,10 @@ class MetronomeView extends WatchUi.DataField {
         _zone = _cadence.zone();
         _deviation = _cadence.deviationPercent(_config);
 
-        // Always advance the scheduler's phase, even on an alert tick, so the
-        // beat grid stays aligned to the wall clock rather than shifting by a
-        // second every time the runner drifts out of range.
-        var offsets = _scheduler.nextWindow(_cue.windowMs(), _cue.minBeatMs());
+        // The beat grid is absolute, so an alert tick cannot shift it: the
+        // schedule is derived from the clock, not from how many times we have
+        // been called.
+        var offsets = _scheduler.schedule(now, _cue.horizonMs());
 
         if (shouldAlert) {
             // The alert replaces this window's beats. Overlapping them would
@@ -86,13 +91,14 @@ class MetronomeView extends WatchUi.DataField {
     //! Start beating on the timer running, stop on pause/stop, and reset the
     //! beat phase across every edge so the first beat after a resume lands
     //! immediately rather than at some leftover fraction of a second.
-    private function handleTimerEdges(timerState as Number) as Void {
+    private function handleTimerEdges(timerState as Number, nowMs as Number) as Void {
         if (timerState == _lastTimerState) { return; }
 
         var nowRunning = (timerState == Activity.TIMER_STATE_ON);
 
         if (nowRunning) {
-            _scheduler.reset();
+            // Put the next beat exactly on the moment the runner set off.
+            _scheduler.restart(nowMs);
             _cadence.clear();
             // Always start beating with the timer. There is deliberately no
             // "start manually" option: a data field cannot receive any user

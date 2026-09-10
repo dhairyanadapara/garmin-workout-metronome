@@ -18,25 +18,29 @@ import Toybox.System;
 //! one second and not longer.
 class Cue {
 
-    // A one second window at 220 spm is 3.7 beats -> 8 elements
-    // (beat + gap per beat). That is the vibrate() ceiling, so 1000ms is the
-    // largest window we can serve both outputs from. Do not raise this
-    // without splitting the tone and vibe windows apart.
-    const WINDOW_MS = 1000;
+    // How far ahead each output is scheduled.
+    //
+    // The horizon MUST exceed the wake-up interval, or a late compute() leaves
+    // an audible hole. compute() is nominally 1 Hz, so 1500ms tolerates a
+    // wake-up running 500ms late. Measured on the fr165 target: playTone
+    // accepts at least 32 profile elements, and 220spm over 1500ms needs 12,
+    // so the tone side has room to spare.
+    const TONE_HORIZON_MS = 1500;
+
+    // Vibration has no such room. MEASURED: Attention.vibrate with 10 elements
+    // raises an UNCATCHABLE "Too Many Arguments Error" that takes the data
+    // field down with it -- try/catch does not save you. 8 is a hard ceiling,
+    // enforced by truncation below, and the vibe horizon is simply whatever
+    // fits inside it.
     const VIBE_MAX_ELEMENTS = 8;
 
     // Beat character. Short and high cuts through road noise and wind better
     // than a long low tone, and a short beat leaves a clean gap at high spm.
+    // Beats are always full length: one clipped at the end of a horizon is
+    // re-queued by the next wake-up, so there is nothing to shorten for.
     const BEAT_FREQ_HZ = 2000;
     const BEAT_MS = 40;
     const BEAT_VIBE_DUTY = 65;
-
-    // The shortest beat still worth playing. A profile is CANCELLED by the
-    // next second's playTone call, so a beat near the end of a window gets
-    // cut short; below this length it would be inaudible, and BeatScheduler
-    // defers it to the next window instead. Measured from a recording: at
-    // 170spm the un-guarded version silently dropped a beat every ~6s.
-    const MIN_BEAT_MS = 15;
 
     // Deviation alert: a rising pair means "speed up", falling means
     // "slow down". Deliberately longer and two-toned so it is never confused
@@ -58,13 +62,9 @@ class Cue {
         _hasVibrate = (Attention has :vibrate);
     }
 
-    //! The scheduling window length. Exposed as a method because Monkey C
-    //! class consts are not reliably reachable as Cue.WINDOW_MS from outside.
-    public function windowMs() as Number { return WINDOW_MS; }
-
-    //! Shortest beat worth scheduling; BeatScheduler needs this to decide
-    //! whether a beat has room to sound before the window ends.
-    public function minBeatMs() as Number { return MIN_BEAT_MS; }
+    //! How far ahead to schedule. Exposed as a method because Monkey C class
+    //! consts are not reliably reachable as Cue.TONE_HORIZON_MS from outside.
+    public function horizonMs() as Number { return TONE_HORIZON_MS; }
 
     public function hasTone() as Boolean { return _hasTone; }
     public function hasToneProfile() as Boolean { return _hasToneProfile; }
@@ -148,8 +148,10 @@ class Cue {
         }
     }
 
-    //! Build [rest, beat, rest, beat, ...] covering the whole window and hand
-    //! it to the firmware in one call.
+    //! Build [rest, beat, rest, beat, ...] over the whole horizon and hand it
+    //! to the firmware in one call. Whatever is still unplayed when the next
+    //! wake-up arrives gets cancelled and re-queued by the scheduler, so the
+    //! tail needs no special handling.
     private function queueToneWindow(offsetsMs as Array<Number>) as Void {
         var profile = [];
         var cursor = 0;
@@ -164,18 +166,8 @@ class Cue {
                 cursor = at;
             }
 
-            // Shorten the beat rather than let it overrun the window. The
-            // firmware cancels an unfinished profile when the next second's
-            // playTone arrives, so an overrunning beat is not merely clipped
-            // -- it can vanish. Shortening costs nothing perceptually because
-            // rhythm is carried by the ONSET, and BeatScheduler guarantees at
-            // least MIN_BEAT_MS of room here.
-            var beatMs = BEAT_MS;
-            if (at + beatMs > WINDOW_MS) {
-                beatMs = WINDOW_MS - at;
-            }
-            profile.add(new Attention.ToneProfile(BEAT_FREQ_HZ, beatMs));
-            cursor = at + beatMs;
+            profile.add(new Attention.ToneProfile(BEAT_FREQ_HZ, BEAT_MS));
+            cursor = at + BEAT_MS;
         }
 
         if (profile.size() == 0) { return; }
@@ -189,9 +181,14 @@ class Cue {
         }
     }
 
-    //! Same idea for the vibration motor, but truncated to VIBE_MAX_ELEMENTS.
-    //! Note: Forerunners flatten pattern intensity, so the duty cycle mostly
-    //! only decides "buzzing or not" -- the DURATIONS carry the rhythm.
+    //! Same idea for the vibration motor, but HARD truncated to
+    //! VIBE_MAX_ELEMENTS: going over does not throw something catchable, it
+    //! kills the data field. The vibe cue therefore covers less of the horizon
+    //! than the tone does at high cadence, which is an acceptable trade -- the
+    //! tone carries the rhythm and the next wake-up tops the vibration up.
+    //!
+    //! Forerunners flatten pattern intensity, so the duty cycle mostly only
+    //! decides "buzzing or not" -- the DURATIONS carry the rhythm.
     private function queueVibeWindow(offsetsMs as Array<Number>) as Void {
         var profile = [];
         var cursor = 0;
@@ -205,13 +202,8 @@ class Cue {
                 cursor = at;
             }
 
-            // Shortened at the window edge for the same reason as the tone.
-            var beatMs = BEAT_MS;
-            if (at + beatMs > WINDOW_MS) {
-                beatMs = WINDOW_MS - at;
-            }
-            profile.add(new Attention.VibeProfile(BEAT_VIBE_DUTY, beatMs));
-            cursor = at + beatMs;
+            profile.add(new Attention.VibeProfile(BEAT_VIBE_DUTY, BEAT_MS));
+            cursor = at + BEAT_MS;
         }
 
         if (profile.size() == 0) { return; }

@@ -1,58 +1,77 @@
 import Toybox.Lang;
 
-//! Pure beat-timing maths. No I/O, no Toybox.Attention, no Activity -- so it
-//! can be unit tested in the simulator without a running activity.
+//! Look-ahead beat scheduler on an absolute timeline.
 //!
-//! WHY THIS CLASS EXISTS
-//! A Connect IQ data field cannot use Toybox.Timer and compute() is called
-//! only once per second. So we never "tick" a beat; instead, once per second
-//! we ask this class for every beat offset that falls inside the NEXT one
-//! second window, and hand that whole window to the firmware as a single
-//! queued tone/vibe profile.
+//! This is the standard software-metronome pattern (the one behind DAWs, drum
+//! machines and Web Audio's "two clocks" approach), adapted to the one
+//! constraint Connect IQ adds.
 //!
-//! TWO TRAPS THIS CLASS EXISTS TO AVOID
+//! THE PATTERN
+//!   1. Beats live on an ABSOLUTE timeline: beat(n) = t0 + n * interval.
+//!      Nothing is derived by accumulating deltas, so drift is impossible by
+//!      construction rather than by testing.
+//!   2. A coarse, unreliable wake-up clock (compute(), nominally 1 Hz) drives
+//!      a precise output clock (the firmware's own tone playback). The
+//!      wake-up only tops up the queue -- it is never itself the rhythm.
+//!   3. Each wake-up schedules every beat due in [now, now + horizon), where
+//!      the horizon is LONGER than the wake-up interval. That overlap is what
+//!      makes a late wake-up harmless.
 //!
-//! 1. PHASE DRIFT. If you restart the beat phase at each compute() tick, the
-//!    beat drifts against the wall clock and the rhythm stutters once per
-//!    second. Instead we carry the fractional remainder of the last window
-//!    forward, in microseconds, using exact integer maths.
+//! THE CONNECT IQ TWIST
+//! There is no "play at absolute time T" call. Attention.playTone takes a
+//! RELATIVE profile, and issuing a new one CANCELS whatever is still playing.
+//! So the overlap is re-queued rather than merged: each call recomputes the
+//! beats still in the future and emits them as offsets from now.
 //!
-//! 2. THE TRUNCATED TAIL. A recording of the running metronome showed a beat
-//!    vanishing every ~6 seconds at 170spm -- gaps of 706ms against a 353ms
-//!    interval. The cause: when the next second's playTone call arrives, the
-//!    firmware CANCELS whatever of the previous profile is still playing. Any
-//!    beat scheduled in the last few milliseconds of a window was therefore
-//!    silently cut to nothing.
+//! That makes scheduling IDEMPOTENT, which is what makes the whole thing
+//! robust. Measured behaviours this handles with no special case:
+//!   - compute() firing twice 47ms apart at activity start (seen in the
+//!     simulator): the second call simply re-queues the same future beats.
+//!   - a wake-up arriving late: the horizon already covered the gap.
+//!   - a beat cancelled mid-flight: it is still in the future by less than
+//!     TOL_MS, so the next call re-queues it instead of losing it.
 //!
-//!    So a beat is only scheduled if at least `minBeatMs` of it can sound
-//!    before the window ends. One that cannot is carried into the next window
-//!    and lands at offset 0 there -- late by less than minBeatMs, rather than
-//!    missing altogether. Beats that fit but cannot run full length are
-//!    shortened in place by Cue, which costs nothing perceptually: rhythm is
-//!    carried by a beat's ONSET, not its duration.
+//! An earlier version instead cut time into disjoint 1000ms windows and
+//! carried a phase remainder between them. It drifted nothing, but every
+//! boundary became an artefact: a recording showed a beat vanishing every
+//! 6.01 seconds, because a beat landing near a window edge was cancelled by
+//! the next call before it could sound. Absolute time removes the boundary
+//! rather than defending it.
 class BeatScheduler {
 
-    // Microseconds until the next beat, measured from the START of the next
-    // window we are asked to fill.
-    //
-    // Usually in [0, _intervalUs). It can be slightly NEGATIVE -- down to
-    // -minBeatUs -- when a beat was carried over from the previous window
-    // because it could not finish there. A negative carry means "this beat was
-    // due just before now", and it is emitted at offset 0.
-    private var _carryUs as Number = 0;
+    //! How far into the past a beat may be and still be worth playing.
+    //!
+    //! A beat cancelled mid-flight is only a few ms old when the cancelling
+    //! call arrives, so re-queueing it recovers it. Kept BELOW the beat length
+    //! so a beat that already sounded in full is never played twice.
+    const TOL_MS = 20;
 
-    // Microseconds between beats.
+    //! If the timeline is further behind than this -- the field was paused,
+    //! off-screen, or the clock wrapped -- re-base instead of stepping the
+    //! whole way forward one beat at a time.
+    const RESYNC_MS = 5000;
+
+    //! Hard ceiling on beats returned from one call. Nothing should approach
+    //! it (220spm over a 1500ms horizon is 6), but an absurd interval must not
+    //! be able to spin this loop.
+    const MAX_BEATS = 16;
+
     private var _intervalUs as Number = 0;
 
-    //! @param spm target steps per minute (the runner's cadence target)
-    //! @param stepsPerBeat 1 = beat on every step, 2 = every other step, 4 = every 4th
+    // Absolute time of the next beat not yet known to have sounded, split into
+    // whole milliseconds plus a 0..999us remainder. The remainder is what
+    // keeps a tempo like 170spm (352.941ms) exact without floating point.
+    private var _nextMs as Number = 0;
+    private var _nextFracUs as Number = 0;
+    private var _started as Boolean = false;
+
     public function initialize(spm as Number, stepsPerBeat as Number) {
         setTempo(spm, stepsPerBeat);
     }
 
-    //! Change tempo. Resets phase, because a tempo change is a deliberate
-    //! discontinuity -- carrying the old phase over would produce one
-    //! wrong-length gap at the changeover.
+    //! Change tempo without disturbing the timeline: the next beat still lands
+    //! when it was already due, and the new spacing applies from there. That
+    //! is what a musician expects when they turn the dial.
     public function setTempo(spm as Number, stepsPerBeat as Number) as Void {
         var safeSpm = spm;
         if (safeSpm < MIN_SPM) { safeSpm = MIN_SPM; }
@@ -64,65 +83,87 @@ class BeatScheduler {
         var beatsPerMinute = safeSpm / divisor;
         if (beatsPerMinute < 1) { beatsPerMinute = 1; }
 
-        // 60 s in microseconds / beats per minute. Integer division loses at
-        // most 1us per beat -- ~11ms over an hour at 180spm. Irrelevant next
-        // to the firmware's own scheduling granularity (milliseconds).
         _intervalUs = 60000000 / beatsPerMinute;
-        _carryUs = 0;
     }
 
-    //! Beat interval in whole milliseconds (for display / tests).
     public function intervalMs() as Number {
         return (_intervalUs + 500) / 1000;
     }
 
-    //! Drop the accumulated phase so the next window starts with a beat at
-    //! offset 0. Call on activity start, unpause, or manual restart.
-    public function reset() as Void {
-        _carryUs = 0;
+    //! Put the next beat exactly at `nowMs`. Call on activity start and on
+    //! resume, so the first beat lands the moment the runner sets off.
+    public function restart(nowMs as Number) as Void {
+        _nextMs = nowMs;
+        _nextFracUs = 0;
+        _started = true;
     }
 
-    //! Every beat offset (in ms, relative to the window start) that can
-    //! actually SOUND inside the next `windowMs` window, and advance the phase.
+    //! Offsets, in ms from `nowMs`, of every beat due within the horizon.
     //!
-    //! Call this EXACTLY ONCE per window you actually play. Calling it twice
-    //! without playing the first window advances the phase and loses beats.
+    //! Idempotent: calling twice with the same `nowMs` returns the same
+    //! offsets and leaves the timeline unchanged. That is deliberate -- it is
+    //! what makes a duplicate or early wake-up a non-event.
     //!
-    //! @param windowMs    length of the window being filled
-    //! @param minBeatMs   shortest beat worth scheduling; a beat with less
-    //!                    room than this defers to the next window
-    public function nextWindow(windowMs as Number, minBeatMs as Number) as Array<Number> {
-        var windowUs = windowMs * 1000;
-        var minBeatUs = minBeatMs * 1000;
-        var offsets = [] as Array<Number>;
-
-        var atUs = _carryUs;
-
-        // Only schedule a beat that has room to be heard. This is the guard
-        // against the truncated tail described above.
-        while (atUs + minBeatUs <= windowUs) {
-            var offsetUs = atUs;
-            if (offsetUs < 0) {
-                // Carried over from the previous window: play it immediately.
-                offsetUs = 0;
-            }
-            offsets.add(offsetUs / 1000);
-
-            // Advance by the TRUE interval, not from the clamped offset, so
-            // carrying a beat over never shifts the underlying grid.
-            atUs += _intervalUs;
+    //! @param nowMs      System.getTimer() at the top of this wake-up
+    //! @param horizonMs  how far ahead to schedule; MUST exceed the expected
+    //!                   wake-up interval, or a late wake-up leaves a hole
+    public function schedule(nowMs as Number, horizonMs as Number) as Array<Number> {
+        if (!_started) {
+            restart(nowMs);
         }
 
-        // Carry the overshoot -- or the shortfall, if we stopped early to
-        // avoid a truncated beat -- into the next window. This is the whole
-        // point: the phase is continuous across the 1 Hz compute() boundary.
-        _carryUs = atUs - windowUs;
+        var behind = nowMs - _nextMs;
+
+        // Clock went backwards (System.getTimer() wraps about every 25 days),
+        // or we have been away long enough that stepping forward beat by beat
+        // is pointless. Either way, start the timeline again from now.
+        if (behind < 0 && behind < -RESYNC_MS) {
+            restart(nowMs);
+            behind = 0;
+        } else if (behind > RESYNC_MS) {
+            restart(nowMs);
+            behind = 0;
+        }
+
+        // Retire beats that have definitively already sounded. Anything more
+        // recent than TOL_MS may have been cut off mid-beat, so it stays on
+        // the timeline to be re-queued below.
+        while (_nextMs < nowMs - TOL_MS) {
+            advance();
+        }
+
+        // Emit from temporaries: the timeline is NOT consumed here, which is
+        // exactly what makes repeated calls safe.
+        var offsets = [] as Array<Number>;
+        var t = _nextMs;
+        var frac = _nextFracUs;
+        var limit = nowMs + horizonMs;
+
+        while (t < limit && offsets.size() < MAX_BEATS) {
+            var offset = t - nowMs;
+            if (offset < 0) {
+                // Due a moment ago and probably cut short -- play it now.
+                offset = 0;
+            }
+            offsets.add(offset);
+
+            var total = frac + _intervalUs;
+            t += total / 1000;
+            frac = total % 1000;
+        }
 
         return offsets;
     }
 
-    // Guard rails. 100..220 spm covers walking through to elite track work;
-    // outside that the tone profile either has too few or too many elements.
+    //! Step the timeline on by exactly one interval, carrying the sub
+    //! millisecond remainder so nothing is ever rounded away.
+    private function advance() as Void {
+        var total = _nextFracUs + _intervalUs;
+        _nextMs += total / 1000;
+        _nextFracUs = total % 1000;
+    }
+
+    // Guard rails. 100..220 spm covers walking through to elite track work.
     const MIN_SPM = 100;
     const MAX_SPM = 220;
 }

@@ -6,13 +6,15 @@ The Forerunner 165 has no built-in metronome (the 255/265/955 do). Every metrono
 
 ## How it beats, given a data field can't use a timer
 
-A data field gets exactly one `compute()` call per second and `Toybox.Timer` is unavailable, so the app can never be awake for the individual beats. Instead:
+`compute()` fires roughly once a second and `Toybox.Timer` is unavailable, so the app can never be awake for an individual beat. `Attention.playTone` takes a *relative* profile — an array of (frequency, duration) pairs — and a new call **cancels** whatever is still playing.
 
-> Once per second, `compute()` hands the firmware **the next full second of rhythm in a single call** — `Attention.playTone({:toneProfile => [...]})` takes an *array* of (frequency, duration) pairs and plays them back-to-back on its own clock. `Attention.vibrate()` takes a `VibeProfile` array the same way.
+So the app uses the standard software-metronome architecture: **look-ahead scheduling on an absolute timeline**, the pattern behind DAWs, drum machines and Web Audio's "two clocks".
 
-`Attention.vibrate` is capped at **8 elements**, and 220 spm needs exactly 8 (beat + rest, four times). That cap is why the scheduling window is 1000 ms and not longer.
+> Beats live at absolute times (`t0 + n × interval`). Each wake-up emits every beat due in `[now, now + 1500ms)` as offsets from *now* — a horizon deliberately longer than the wake-up interval, so a late wake-up leaves no hole. Because the schedule is recomputed from the clock, it is **idempotent**: a duplicate wake-up re-queues the same beats instead of corrupting the phase.
 
-The other half is phase continuity. 170 spm is 352.9 ms per beat, which does not divide into a second — so [`BeatScheduler`](source/BeatScheduler.mc) carries the leftover microseconds into the next window instead of restarting at zero each tick. Restarting is the classic bug and produces a stutter once per second, every second. Verified: **≤1 ms per-beat deviation, ≤1 beat drift per hour.**
+That one property handles the whole family of clock misbehaviours — the double `compute()` at activity start, jitter, late wake-ups, long pauses, even the timer wrapping — with no special cases. Full rationale and measurements: [docs/SCHEDULING.md](docs/SCHEDULING.md).
+
+Measured on the FR165 simulator across 52 wake-ups including a duplicate: **0 dropped beats, gaps only 352–353 ms, worst deviation 1 ms, exactly 170.0 spm.**
 
 ## Features
 
@@ -28,7 +30,7 @@ The other half is phase continuity. 170 spm is 352.9 ms per beat, which does not
 source/
   WorkoutMetronomeApp.mc   AppBase; forwards phone settings pushes to the view
   MetronomeView.mc         the data field: compute() cues, onUpdate() only draws
-  BeatScheduler.mc         pure beat-timing maths (drift-free, unit tested)
+  BeatScheduler.mc         look-ahead scheduler on an absolute timeline
   Cue.mc                   everything touching Toybox.Attention, behind capability checks
   CadenceMonitor.mc        rolling average + hysteresis for the off-target alert
   Config.mc                crash-proof typed reads of app settings
@@ -37,6 +39,7 @@ resources/
   settings/                the Garmin Connect Mobile settings screen + defaults
 spike/                     throwaway Phase 1 hardware capability probe
 docs/
+  SCHEDULING.md            how the beat is scheduled, and why -- read before touching it
   SETUP.md                 toolchain install, developer key, build & sideload
   SPIKE.md                 the Phase 1 protocol and how to read the result
   TESTING.md               simulator + on-device test matrix
