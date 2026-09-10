@@ -1,327 +1,224 @@
 import Toybox.Lang;
 import Toybox.Test;
 
-//! Unit tests for the look-ahead scheduler. Run with `tools/build.sh test`.
+//! Unit tests for the beat grid and the arming policy.
 //!
-//! These test the PROPERTIES the pattern relies on -- idempotence, absolute
-//! timing, horizon overlap -- rather than particular offsets, because it is
-//! those properties that make the scheduler robust to a wake-up clock that
-//! fires twice, late, or not at all.
+//! The beat itself is produced by the FIRMWARE looping a repeating profile, so
+//! there is no per-beat scheduling code left to test. What must be correct is:
+//!   - the grid the profile is built from
+//!   - the arming policy, which must never issue a profile while a beat is
+//!     sounding, and must never build one that is not exactly one interval long
 
-const HORIZON = 1500;   // Cue.TONE_HORIZON_MS
-const VIBE_CAP = 8;     // Cue.VIBE_MAX_ELEMENTS -- exceeding it is fatal
+const BEAT_MS = 40;     // Cue.BEAT_MS
 
-//! Play a whole run of wake-ups and return the absolute times of the beats
-//! that actually SOUND, applying the firmware rule that a new playTone
-//! cancels an unfinished profile.
-function soundedBeats(spm as Number, wakeups as Array<Number>) as Array<Number> {
-    var s = new BeatScheduler(spm, 1);
-    s.restart(wakeups[0]);
-
-    var heard = [] as Array<Number>;
-
-    for (var i = 0; i < wakeups.size(); i++) {
-        var now = wakeups[i];
-        var offsets = s.schedule(now, HORIZON);
-        var cancelAt = (i + 1 < wakeups.size()) ? wakeups[i + 1] : 0x7FFFFFFF;
-
-        for (var k = 0; k < offsets.size(); k++) {
-            var start = now + offsets[k];
-            if (start >= cancelAt) {
-                break;              // cancelled before it began
-            }
-            // A beat re-queued after being cut short counts once.
-            if (heard.size() > 0 && start - heard[heard.size() - 1] < 25) {
-                continue;
-            }
-            heard.add(start);
-        }
-    }
-    return heard;
-}
-
-function worstGapError(times as Array<Number>, intervalMs as Number) as Number {
-    var worst = 0;
-    for (var i = 1; i < times.size(); i++) {
-        var error = (times[i] - times[i - 1]) - intervalMs;
-        if (error < 0) { error = -error; }
-        if (error > worst) { worst = error; }
-    }
-    return worst;
-}
-
-function countDrops(times as Array<Number>, intervalMs as Number) as Number {
-    var drops = 0;
-    for (var i = 1; i < times.size(); i++) {
-        if ((times[i] - times[i - 1]) > (intervalMs * 3) / 2) {
-            drops++;
-        }
-    }
-    return drops;
-}
-
-function evenWakeups(count as Number, periodMs as Number) as Array<Number> {
-    var w = [] as Array<Number>;
-    for (var i = 0; i < count; i++) {
-        w.add(100000 + i * periodMs);
-    }
-    return w;
-}
-
-//! Tempo maths.
+//! Tempo is quantised to whole milliseconds because that is the resolution the
+//! firmware profile uses. Rounding, not truncation, halves the error.
 (:test)
 function testIntervalMaths(logger as Logger) as Boolean {
-    var s = new BeatScheduler(180, 1);
-    Test.assertEqualMessage(s.intervalMs(), 333, "180spm should be ~333ms");
-    s.setTempo(180, 2);
-    Test.assertEqualMessage(s.intervalMs(), 667, "180spm/2 should be ~667ms");
-    s.setTempo(120, 1);
-    Test.assertEqualMessage(s.intervalMs(), 500, "120spm should be 500ms");
+    var g = new BeatGrid(180, 1);
+    Test.assertEqualMessage(g.intervalMs(), 333, "180spm should be 333ms");
+
+    g.setTempo(170, 1);
+    Test.assertEqualMessage(g.intervalMs(), 353, "170spm should round to 353ms, not 352");
+
+    g.setTempo(180, 2);
+    Test.assertEqualMessage(g.intervalMs(), 667, "180spm/2 should round to 667ms");
+
+    g.setTempo(120, 1);
+    Test.assertEqualMessage(g.intervalMs(), 500, "120spm should be 500ms");
     return true;
 }
 
-//! A corrupt setting must not produce a zero or negative interval.
+//! The quantised tempo must stay within a fraction of a percent of the target.
+(:test)
+function testTempoErrorIsNegligible(logger as Logger) as Boolean {
+    for (var spm = 100; spm <= 220; spm++) {
+        var g = new BeatGrid(spm, 1);
+        var errorTenths = (600000 / g.intervalMs()) - spm * 10;
+        if (errorTenths < 0) { errorTenths = -errorTenths; }
+        Test.assertMessage(errorTenths <= 6,
+            spm + "spm quantises with an error of " + errorTenths + " tenths of a spm");
+    }
+    return true;
+}
+
+//! A corrupt setting must never produce a zero or negative interval.
 (:test)
 function testTempoClamping(logger as Logger) as Boolean {
-    var s = new BeatScheduler(0, 0);
-    Test.assertMessage(s.intervalMs() > 0, "zero spm must not give a zero interval");
-    s.setTempo(-50, 1);
-    Test.assertMessage(s.intervalMs() > 0, "negative spm must not give a zero interval");
-    s.setTempo(9999, 1);
-    Test.assertMessage(s.intervalMs() > 0, "absurd spm must still be positive");
+    var g = new BeatGrid(0, 0);
+    Test.assertMessage(g.intervalMs() > 0, "zero spm must not give a zero interval");
+    g.setTempo(-50, 1);
+    Test.assertMessage(g.intervalMs() > 0, "negative spm must not give a zero interval");
+    g.setTempo(9999, 1);
+    Test.assertMessage(g.intervalMs() > 0, "absurd spm must still be positive");
     return true;
 }
 
-//! THE PROPERTY THE WHOLE DESIGN RESTS ON.
-//!
-//! Scheduling must be idempotent: the same clock reading must produce the same
-//! answer and leave the timeline untouched. This is what makes a duplicate
-//! wake-up a non-event, and it is what the old window-based scheduler could
-//! not do -- there, every call consumed a window whether or not time had moved.
+//! restart() puts a beat on the instant the runner set off.
 (:test)
-function testScheduleIsIdempotent(logger as Logger) as Boolean {
-    var s = new BeatScheduler(170, 1);
-    s.restart(500000);
-
-    var a = s.schedule(500000, HORIZON);
-    var b = s.schedule(500000, HORIZON);
-    var c = s.schedule(500000, HORIZON);
-
-    Test.assertEqualMessage(a.size(), b.size(), "repeat call changed the beat count");
-    Test.assertEqualMessage(b.size(), c.size(), "third call changed the beat count");
-    for (var i = 0; i < a.size(); i++) {
-        Test.assertEqualMessage(a[i], b[i], "repeat call changed offset " + i);
-        Test.assertEqualMessage(b[i], c[i], "third call changed offset " + i);
-    }
+function testRestartPutsABeatOnNow(logger as Logger) as Boolean {
+    var g = new BeatGrid(170, 1);
+    g.restart(500000);
+    Test.assertEqualMessage(g.nextBeatDelayMs(500000), 0, "a beat should be due at restart");
     return true;
 }
 
-//! REGRESSION: compute() fires twice 47ms apart at activity start (measured in
-//! the simulator). The rhythm must be unaffected.
+//! The grid is absolute: the delay to the next beat depends only on the clock,
+//! never on how many times it has been asked. This is what makes a duplicate
+//! or out-of-order wake-up harmless.
 (:test)
-function testDuplicateWakeupAtStart(logger as Logger) as Boolean {
-    var tempos = [150, 170, 173, 200, 220];
-    for (var t = 0; t < tempos.size(); t++) {
-        var spm = tempos[t];
-        var interval = new BeatScheduler(spm, 1).intervalMs();
+function testGridIsAbsoluteAndIdempotent(logger as Logger) as Boolean {
+    var g = new BeatGrid(170, 1);
+    g.restart(500000);
 
-        var w = [100000, 100047] as Array<Number>;
-        for (var i = 1; i < 90; i++) { w.add(100000 + i * 1000); }
+    var a = g.nextBeatDelayMs(500100);
+    var b = g.nextBeatDelayMs(500100);
+    var c = g.nextBeatDelayMs(500100);
+    Test.assertEqualMessage(a, b, "repeat query changed the answer");
+    Test.assertEqualMessage(b, c, "third query changed the answer");
+    Test.assertEqualMessage(a, 253, "170spm: 100ms after a beat, 253ms to the next");
 
-        var heard = soundedBeats(spm, w);
-        var drops = countDrops(heard, interval);
-        var worst = worstGapError(heard, interval);
-        logger.debug(spm + "spm dup-start: beats=" + heard.size()
-                     + " drops=" + drops + " worstErr=" + worst + "ms");
-
-        Test.assertEqualMessage(drops, 0, spm + "spm: duplicate start tick dropped a beat");
-        Test.assertMessage(worst <= 45, spm + "spm: worst error " + worst + "ms after duplicate tick");
-    }
+    // Asking out of order must not disturb it either.
+    g.nextBeatDelayMs(500900);
+    Test.assertEqualMessage(g.nextBeatDelayMs(500100), 253,
+        "an out-of-order query shifted the grid");
     return true;
 }
 
-//! REGRESSION FOR THE 6-SECOND DROPOUT.
-//!
-//! A recording at 170spm showed a beat vanishing every 6.01 seconds: 10 in 60
-//! seconds, gaps of ~700ms against a 353ms interval. The cause was a beat
-//! landing at a scheduling-window boundary and being cancelled before it could
-//! sound. With an absolute timeline and an overlapping horizon there are no
-//! boundaries, so this must be exactly zero.
+//! Walking the clock forward must produce beats exactly one interval apart,
+//! with no accumulation error, at every tempo.
 (:test)
-function testNoDroppedBeatsUnderCleanClock(logger as Logger) as Boolean {
+function testGridSpacingIsExact(logger as Logger) as Boolean {
     var tempos = [100, 150, 165, 170, 173, 180, 190, 200, 220];
-    for (var t = 0; t < tempos.size(); t++) {
-        var spm = tempos[t];
-        var interval = new BeatScheduler(spm, 1).intervalMs();
-        var heard = soundedBeats(spm, evenWakeups(120, 1000));
-        var drops = countDrops(heard, interval);
-        var worst = worstGapError(heard, interval);
-        logger.debug(spm + "spm clean: beats=" + heard.size()
-                     + " drops=" + drops + " worstErr=" + worst + "ms");
-        Test.assertEqualMessage(drops, 0, spm + "spm dropped " + drops + " beats on a clean clock");
-        Test.assertMessage(worst <= 25, spm + "spm worst error " + worst + "ms");
-    }
-    return true;
-}
-
-//! A jittery wake-up clock -- a watch busy with GPS, HR and screen redraws --
-//! must not disturb the rhythm, because the rhythm comes from the absolute
-//! timeline and not from when we happened to be called.
-(:test)
-function testJitteryWakeupClock(logger as Logger) as Boolean {
-    var jitter = [0, 63, -47, 28, -71, 15, 80, -22, 51, -66, 9, 74, -35, 42, -58];
-    var tempos = [170, 173, 220];
 
     for (var t = 0; t < tempos.size(); t++) {
-        var spm = tempos[t];
-        var interval = new BeatScheduler(spm, 1).intervalMs();
+        var g = new BeatGrid(tempos[t], 1);
+        var interval = g.intervalMs();
+        var base = 1000000;
+        g.restart(base);
 
-        var w = [] as Array<Number>;
-        for (var i = 0; i < 120; i++) {
-            w.add(100000 + i * 1000 + jitter[i % jitter.size()]);
+        var previous = base;
+        var beats = 600000 / interval;      // ten minutes of beats
+        for (var n = 1; n <= beats; n++) {
+            var beat = base + n * interval;
+            Test.assertEqualMessage(g.nextBeatDelayMs(beat), 0,
+                tempos[t] + "spm: beat " + n + " is not on the grid");
+            Test.assertEqualMessage(beat - previous, interval,
+                tempos[t] + "spm: spacing drifted at beat " + n);
+            previous = beat;
         }
-
-        var heard = soundedBeats(spm, w);
-        var drops = countDrops(heard, interval);
-        var worst = worstGapError(heard, interval);
-        logger.debug(spm + "spm jitter: beats=" + heard.size()
-                     + " drops=" + drops + " worstErr=" + worst + "ms");
-        Test.assertEqualMessage(drops, 0, spm + "spm dropped a beat under wake-up jitter");
-        Test.assertMessage(worst <= 45, spm + "spm worst error " + worst + "ms under jitter");
     }
     return true;
 }
 
-//! The horizon exists to cover a LATE wake-up. A 1500ms horizon must survive a
-//! wake-up arriving 500ms late; that is the whole reason it is not 1000ms.
-(:test)
-function testHorizonCoversALateWakeup(logger as Logger) as Boolean {
-    var spm = 170;
-    var interval = new BeatScheduler(spm, 1).intervalMs();
-
-    var w = [] as Array<Number>;
-    var t = 100000;
-    for (var i = 0; i < 90; i++) {
-        w.add(t);
-        t += (i % 7 == 3) ? 1450 : 1000;   // every 7th wake-up is 450ms late
-    }
-
-    var heard = soundedBeats(spm, w);
-    var drops = countDrops(heard, interval);
-    logger.debug("late-wakeup: beats=" + heard.size() + " drops=" + drops);
-    Test.assertEqualMessage(drops, 0, "a late wake-up left a hole: " + drops + " drops");
-    return true;
-}
-
-//! Absolute timing means no drift, ever. Over half an hour the number of
-//! beats actually SOUNDED must match exactly, not approximately.
+//! THE ARMING RULE.
 //!
-//! Note this must be counted through the firmware model, not by tallying
-//! offsets: the scheduler deliberately re-emits a beat that was due within
-//! TOL_MS, because that is how a beat cancelled mid-flight is recovered. A
-//! naive tally counts those twice.
+//! A profile may only be issued when no beat is sounding, or the new profile
+//! cancels a beat mid-flight -- exactly the fault that produced audibly
+//! missing beats in the two earlier designs.
+//!
+//! The rule is delay <= interval - BEAT_MS. Prove it never admits an unsafe
+//! moment, and that it admits enough moments to be practical.
 (:test)
-function testNoDriftOverHalfAnHour(logger as Logger) as Boolean {
-    var tempos = [150, 170, 173, 220];
+function testArmingWindowIsSafeAndReachable(logger as Logger) as Boolean {
+    var tempos = [100, 150, 170, 180, 200, 220];
 
     for (var t = 0; t < tempos.size(); t++) {
-        var spm = tempos[t];
-        var heard = soundedBeats(spm, evenWakeups(1800, 1000));
+        var g = new BeatGrid(tempos[t], 1);
+        var interval = g.intervalMs();
+        var base = 2000000;
+        g.restart(base);
 
-        // The last wake-up schedules a horizon beyond the measured window, so
-        // allow the beats that fall past the final second.
-        var expected = spm * 30;
-        var error = heard.size() - expected;
-        if (error < 0) { error = -error; }
+        var safe = 0;
+        var total = 0;
 
-        logger.debug(spm + "spm: beats=" + heard.size() + " expected=" + expected
-                     + " error=" + error);
-        Test.assertMessage(error <= 2,
-            spm + "spm drifted by " + error + " beats over 30 minutes");
-    }
-    return true;
-}
+        for (var offset = 0; offset < interval; offset++) {
+            var now = base + offset;
+            var delay = g.nextBeatDelayMs(now);
+            var since = g.sinceLastBeatMs(now);
+            total++;
 
-//! FATAL-IF-WRONG: Attention.vibrate raises an UNCATCHABLE error above 8
-//! elements, measured on the fr165 target. A vibe profile costs a rest plus a
-//! beat per beat, so the scheduler must never hand Cue more beats than that
-//! budget allows for the vibe horizon Cue actually uses.
-(:test)
-function testVibeElementBudget(logger as Logger) as Boolean {
-    // Cue truncates to VIBE_CAP, but prove the truncation is never reached at
-    // the vibe horizon, so the vibration is not silently cut short either.
-    var s = new BeatScheduler(220, 1);      // fastest legal tempo
-    var base = 300000;
-    s.restart(base);
-
-    var worst = 0;
-    for (var i = 0; i < 300; i++) {
-        var offsets = s.schedule(base + i * 1000, 1000);   // vibe uses one window
-        var elements = offsets.size() * 2;
-        if (offsets.size() > 0 && offsets[0] == 0) { elements -= 1; }
-        if (elements > worst) { worst = elements; }
-    }
-
-    logger.debug("worst vibe elements at 220spm over a 1000ms horizon = " + worst);
-    Test.assertMessage(worst <= VIBE_CAP,
-        "needs " + worst + " vibe elements; the uncatchable limit is " + VIBE_CAP);
-    return true;
-}
-
-//! Offsets must be ascending and inside the horizon: Cue turns them into rest
-//! durations, and anything else produces a negative rest.
-(:test)
-function testOffsetsWellFormed(logger as Logger) as Boolean {
-    var tempos = [100, 150, 170, 200, 220];
-    for (var t = 0; t < tempos.size(); t++) {
-        var s = new BeatScheduler(tempos[t], 1);
-        var base = 400000;
-        s.restart(base);
-        for (var i = 0; i < 200; i++) {
-            var offsets = s.schedule(base + i * 1000, HORIZON);
-            for (var k = 0; k < offsets.size(); k++) {
-                Test.assertMessage(offsets[k] >= 0 && offsets[k] < HORIZON,
-                    "offset " + offsets[k] + " outside the horizon");
-                if (k > 0) {
-                    Test.assertMessage(offsets[k] > offsets[k - 1],
-                        "offsets must ascend within a call");
-                }
+            if (delay <= interval - BEAT_MS) {
+                safe++;
+                // Nothing may be sounding.
+                Test.assertMessage(since == 0 || since >= BEAT_MS,
+                    tempos[t] + "spm: armed " + since + "ms into a " + BEAT_MS + "ms beat");
+                // And the profile must be exactly one interval long.
+                Test.assertMessage(interval - BEAT_MS - delay >= 0,
+                    tempos[t] + "spm: negative tail rest at delay " + delay);
             }
         }
+
+        var percent = (safe * 100) / total;
+        logger.debug(tempos[t] + "spm: " + percent + "% of moments are safe to arm");
+        Test.assertMessage(percent >= 80,
+            tempos[t] + "spm: only " + percent + "% of wake-ups can arm; too few");
     }
     return true;
 }
 
-//! restart() puts the next beat on the instant the runner set off.
+//! sinceLastBeat and nextBeatDelay are two views of one position, and the
+//! arming rule relies on both, so they must agree.
 (:test)
-function testRestartAlignsToNow(logger as Logger) as Boolean {
-    var s = new BeatScheduler(170, 1);
-    s.restart(500000);
-    s.schedule(500000, HORIZON);
-    s.schedule(501000, HORIZON);
+function testGridViewsAgree(logger as Logger) as Boolean {
+    var g = new BeatGrid(173, 1);
+    var interval = g.intervalMs();
+    var base = 3000000;
+    g.restart(base);
 
-    s.restart(505000);
-    var offsets = s.schedule(505000, HORIZON);
-    Test.assertEqualMessage(offsets[0], 0, "restart should place the next beat at offset 0");
+    for (var offset = 0; offset < interval * 3; offset++) {
+        var now = base + offset;
+        var delay = g.nextBeatDelayMs(now);
+        var since = g.sinceLastBeatMs(now);
+        if (delay == 0) {
+            Test.assertEqualMessage(since, 0, "a beat due now should be 0ms since the last");
+        } else {
+            Test.assertEqualMessage(delay + since, interval,
+                "delay " + delay + " + since " + since + " should equal " + interval);
+        }
+    }
     return true;
 }
 
-//! Coming back after a long absence -- paused, or the clock wrapped -- must
-//! re-base rather than grind through thousands of intervals or emit garbage.
+//! Coming back after a long absence -- paused, off-screen, or the clock
+//! wrapped -- must re-base rather than return nonsense.
 (:test)
 function testResyncAfterLongAbsence(logger as Logger) as Boolean {
-    var s = new BeatScheduler(170, 1);
-    s.restart(500000);
-    s.schedule(500000, HORIZON);
+    var g = new BeatGrid(170, 1);
+    g.restart(500000);
+    g.nextBeatDelayMs(500100);
 
-    // Ten minutes later.
-    var offsets = s.schedule(1100000, HORIZON);
-    Test.assertMessage(offsets.size() > 0, "no beats after a long gap");
-    Test.assertEqualMessage(offsets[0], 0, "should re-base to now after a long gap");
+    Test.assertEqualMessage(g.nextBeatDelayMs(1100000), 0,
+        "should re-base after a ten minute gap");
 
-    // And a clock that went backwards (System.getTimer() wraps).
-    var back = s.schedule(1000, HORIZON);
-    Test.assertMessage(back.size() > 0, "no beats after the clock wrapped");
-    Test.assertEqualMessage(back[0], 0, "should re-base to now after a backwards clock");
+    Test.assertEqualMessage(g.nextBeatDelayMs(1000), 0,
+        "should re-base after the clock wrapped backwards");
+    return true;
+}
+
+//! A vibration window must never need more than the 8 elements
+//! Attention.vibrate allows -- exceeding it is an uncatchable crash that
+//! takes the whole data field down.
+(:test)
+function testVibeElementBudget(logger as Logger) as Boolean {
+    var g = new BeatGrid(220, 1);          // fastest legal tempo
+    var interval = g.intervalMs();
+    var base = 4000000;
+    g.restart(base);
+
+    for (var offset = 0; offset < interval; offset++) {
+        var now = base + offset;
+        var first = g.nextBeatDelayMs(now);
+        var at = first;
+        var beats = 0;
+        while (at < 1000 && beats < 4) {   // MetronomeView caps the window at 4
+            beats++;
+            at += interval;
+        }
+        var elements = beats * 2;
+        if (beats > 0 && first == 0) { elements -= 1; }
+        Test.assertMessage(elements <= 8,
+            "vibe window needs " + elements + " elements; the fatal limit is 8");
+    }
     return true;
 }

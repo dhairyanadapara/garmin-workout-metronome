@@ -6,35 +6,54 @@ This is the one genuinely hard part of the app, and it went through a wrong desi
 
 A Connect IQ data field is the only app type that runs inside a native activity, and it gets:
 
-- **`compute()` roughly once per second.** Nominally 1 Hz. Measured in the simulator: usually exactly 1000 ms, but it fires **twice 47–125 ms apart at activity start**, and a busy watch can deliver it late.
+- **`compute()` roughly once per second.** Measured in the simulator: usually exactly 1000 ms, but it fires **twice 47-125 ms apart at activity start**, and a busy watch can deliver it late.
 - **No `Toybox.Timer`.** The app can never be awake for an individual beat.
-- **`Attention.playTone` takes a *relative* profile** — an array of (frequency, duration) pairs — and **a new call cancels whatever is still playing**. There is no "play at absolute time T".
+- **`Attention.playTone` takes a *relative* profile**, and **a new call CANCELS whatever is still playing.**
 
-So the app must express up to a second and a half of rhythm as one relative array, re-issued on an unreliable clock.
+That last point is the crux, and it is what two earlier designs got wrong.
 
-## The pattern: look-ahead scheduling on an absolute timeline
+## Why "feed it every second" cannot work
 
-This is the standard software-metronome architecture — the one behind DAWs, drum machines and Web Audio's "two clocks" approach. Three rules:
+Both earlier designs handed the firmware the next second or so of rhythm on every wake-up. At 170 spm a 40 ms beat occupies 40 ms of every 353 ms, so **roughly 11% of wake-ups land on top of a sounding beat and cut it short.**
 
-1. **Beats live on an absolute timeline.** `beat(n) = t0 + n × interval`. Nothing is derived by accumulating deltas between wake-ups, so drift is impossible *by construction* rather than by testing.
+Recordings of the simulator, analysed by onset detection, showed exactly that:
 
-2. **A coarse, unreliable wake-up clock drives a precise output clock.** `compute()` only tops up the queue; the firmware's own playback is what keeps time. The wake-up is never itself the rhythm.
-
-3. **The look-ahead horizon exceeds the wake-up interval.** Each call schedules every beat due in `[now, now + horizon)`. That overlap is what makes a late wake-up harmless.
-
-The Connect IQ adaptation is that the overlap is **re-queued rather than merged**: because a new `playTone` cancels the old, each call recomputes the beats still ahead and emits them as offsets from *now*.
-
-That makes `schedule()` **idempotent** — and idempotence is what does the real work here:
-
-| Wake-up clock misbehaves | What happens |
+| Design | Result over ~60 s at 170 spm |
 |---|---|
-| Fires twice, 47 ms apart (measured at activity start) | Second call re-queues the same absolute beats, minus any that already sounded. No phase change. |
-| Arrives 450 ms late | The horizon already covered the gap. |
-| Jitters ±80 ms | Beats stay on the absolute grid; only the queue top-up moves. |
-| Doesn't come for 10 minutes (paused, off-screen) | `RESYNC_MS` re-bases instead of stepping forward beat by beat. |
-| Clock runs backwards (`System.getTimer()` wraps ~25 days) | Detected and re-based. |
+| Disjoint 1000 ms windows with a carried phase | **10 dropped beats**, one every 6.01 s, gaps of 685-705 ms against 353 ms |
+| Same, plus a minimum-beat guard and deferral | **2 dropped beats**, bursts as short as 9.7 ms |
+| Look-ahead horizon on an absolute timeline | **2 dropped beats**, bursts as short as 9.7 ms |
 
-A beat cancelled mid-flight is recovered by `TOL_MS`: it is still in the future by less than 20 ms when the cancelling call arrives, so the next call re-queues it. `TOL_MS` is kept **below** the 40 ms beat length, so a beat that already sounded in full is never played twice.
+The look-ahead version was the right *pattern* - absolute timeline, idempotent scheduling, horizon overlap - and it fixed the 6-second periodicity. But it still re-issued a profile every second, so it still cancelled a beat mid-flight about one wake-up in nine. Feeding the firmware is the problem; no scheduling cleverness removes it.
+
+## The design: arm the firmware, do not feed it
+
+`Attention.playTone` accepts **`:repeatCount`** (measured on fr165: accepted up to at least 10000). So the beat pattern is issued **once**, as a single profile exactly one beat period long, and the firmware loops it on its own hardware clock:
+
+```
+[rest leadInMs] [beat 40ms] [rest interval - 40 - leadInMs]     x repeatCount
+```
+
+The rhythm is now produced by hardware timing, not by our wake-up clock. It is even by construction, because nothing interrupts it. Measured on target: one arming of 1699 repeats covers **10 minutes**, and across 40 subsequent wake-ups there were **zero** further tone calls.
+
+This is the same principle as the look-ahead pattern - let the precise clock keep time, not the coarse one - taken to its conclusion. The coarse clock now does nothing but *arm*.
+
+### Re-arming without a phase jump
+
+An arming eventually expires, and a tempo change or a deviation alert invalidates it. Re-arming means another `playTone`, so it must not damage the rhythm. Two rules, which turn out to be one rule:
+
+- The lead-in rest goes **inside** the repeating profile and the trailing rest is shortened to match, so the profile stays exactly one interval long and the beat keeps its phase. Re-arming is phase-accurate to 1 ms.
+- Arm **only when no beat is sounding**, which is true exactly when `delay <= interval - beatMs`.
+
+At 170 spm that admits 313 ms of every 353 ms, so **89% of wake-ups qualify** and there are ~60 chances in the minute before an arming expires. A wake-up that does not qualify simply does nothing, which is correct - the firmware is still playing.
+
+### What still gets fed
+
+`Attention.vibrate` has **no repeat parameter**, so the vibration cue must still be re-issued every wake-up, within a hard 8-element budget. The tone carries the rhythm; the vibration is the coarser cue, and a clipped buzz is far less perceptible than a missing beat.
+
+### Stopping
+
+A long arming outlives a pause, so `Metronome.stop()` must replace the loop with a 1 ms silent profile. Without that the watch keeps beating through a paused activity.
 
 ## Measured platform limits
 
@@ -44,45 +63,29 @@ Probed on the `fr165` target rather than assumed:
 |---|---|
 | `Attention has :ToneProfile` | true |
 | `playTone` profile elements | **32+ accepted** |
+| `playTone :repeatCount` | **accepted up to at least 10000** |
 | `vibrate` profile elements | **8 maximum** |
-| `vibrate` with 10 elements | **uncatchable `Too Many Arguments Error` — kills the data field.** `try`/`catch` does *not* save you |
+| `vibrate` with 10 elements | **uncatchable `Too Many Arguments Error` - kills the data field.** `try`/`catch` does *not* save you |
 
-Hence `TONE_HORIZON_MS = 1500` (220 spm needs 12 elements — plenty of room, and it tolerates a wake-up 500 ms late), while the vibration cue is **hard-truncated to 8 elements** and therefore covers less of the horizon at high cadence. That is an accepted trade: the tone carries the rhythm and the next wake-up tops the vibration up.
+## Tempo quantisation
 
-## What was wrong before, and how it was caught
+The firmware profile works in whole milliseconds, so the grid does too - modelling the beat more finely than the hardware can express it would only let our idea of where a beat is drift from where it actually sounds.
 
-The first implementation cut time into **disjoint 1000 ms windows** and carried a phase remainder between them. It drifted nothing — but it made `compute()` itself the rhythm, so every quirk of the wake-up clock became audible:
-
-- **A beat vanished every 6.01 seconds at 170 spm.** Screen recordings analysed by onset detection: 10 dropped beats in 60 s, gaps of 685–705 ms against a 353 ms interval, and bursts as short as 9.7 ms against a 40 ms beat. Cause: at 170 spm the phase carry cycles so every 6th window places a beat within a millisecond of the window edge, and the next call cancelled it before it could sound.
-- Patching that with a minimum-beat guard plus deferral cut it to **2 drops in 68 s** — better, but the fix was defending a boundary that only existed because of the window partitioning.
-- The duplicate start tick needed a **500 ms threshold guard**, a magic number with no principle behind it.
-
-Both patches are gone. Absolute time removes the boundary rather than defending it, and idempotence removes the duplicate-tick guard rather than tuning it.
+170 spm wants 352.94 ms and gets 353 ms, so the real tempo is 169.97 spm: a 0.017% error, about one beat per hour. What a runner feels is the *spacing* between consecutive beats, and that is exact.
 
 ## Verification
 
-`tools/build.sh test` — 12 tests asserting the *properties*, not particular offsets:
+`tools/build.sh test` - 10 tests covering the grid and the arming policy:
 
-- `testScheduleIsIdempotent` — the same clock reading gives the same answer and leaves the timeline untouched
-- `testDuplicateWakeupAtStart` — the measured 47 ms double-tick, at five tempos
-- `testNoDroppedBeatsUnderCleanClock` — zero drops at 100–220 spm
-- `testJitteryWakeupClock` — ±80 ms wake-up jitter
-- `testHorizonCoversALateWakeup` — a 450 ms late wake-up leaves no hole
-- `testNoDriftOverHalfAnHour` — exact beat counts at four tempos
-- `testVibeElementBudget` — never exceeds the fatal 8-element vibrate limit
-- `testResyncAfterLongAbsence` — long gaps and a backwards clock
-
-Measured end to end on the `fr165` simulator, 52 wake-ups including one duplicate at +125 ms:
-
-```
-sounded beats: 146 over 51.2s
-gap: min=352 max=353 median=353  DROPS=0
-worst deviation from median: 1ms
-implied tempo: 170.0 spm
-```
-
-Against the old scheduler, the same measurement gave a dropped beat every 6.01 seconds.
+- `testGridIsAbsoluteAndIdempotent` - the answer depends only on the clock, so a duplicate or out-of-order wake-up is harmless
+- `testGridSpacingIsExact` - ten minutes of beats at nine tempos, every gap exactly one interval
+- `testArmingWindowIsSafeAndReachable` - checks every millisecond of an interval: the rule never admits a moment when a beat is sounding, never produces a negative tail rest, and still admits at least 80% of moments
+- `testVibeElementBudget` - never exceeds the fatal 8-element vibrate limit
+- `testResyncAfterLongAbsence` - long gaps and a backwards clock
+- plus tempo maths, rounding, clamping, and the two grid views agreeing
 
 ## If you change this
 
-Re-run the recording analysis, don't trust your ear. Capture the simulator's audio, extract with `ffmpeg -vn -ac 1 -ar 48000`, detect onsets on a rectified 1 ms envelope, and check the inter-onset gaps against `60000 / spm`. A dropped beat shows up as a gap of almost exactly twice the interval — which is how the 6-second bug was found in the first place.
+Re-run the recording analysis, do not trust your ear. Capture the simulator audio, extract with `ffmpeg -vn -ac 1 -ar 48000`, detect onsets on a rectified 1 ms envelope, and check inter-onset gaps against `60000 / spm`. A dropped beat is a gap of almost exactly twice the interval; a *clipped* beat shows up as an unusually short burst length. Both are how the earlier faults were found.
+
+**Do not go back to issuing a profile every wake-up.** It has been tried twice and measured twice.

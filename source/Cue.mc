@@ -5,42 +5,31 @@ import Toybox.System;
 //! Everything that touches Toybox.Attention lives here, behind capability
 //! checks, so the rest of the app never has to care what the device supports.
 //!
-//! THE CENTRAL TRICK
-//! A data field gets one compute() call per second and cannot use a Timer, so
-//! it can never "beat" by itself. But Attention.playTone accepts a
-//! :toneProfile ARRAY -- a sequence of (frequency, duration) pairs the
-//! firmware plays back-to-back on its own clock. So each second we hand the
-//! firmware the next second of rhythm in one call, and the beats land
-//! sub-second without us being awake for them.
+//! The tone is ARMED, not fed: one repeating profile that the firmware loops
+//! on its own clock (see Metronome). The vibration cannot work that way --
+//! Attention.vibrate has no repeat parameter -- so it is still topped up each
+//! wake-up, within a hard element budget.
 //!
-//! Attention.vibrate takes a VibeProfile array the same way, but is capped at
-//! VIBE_MAX_ELEMENTS elements -- which is exactly why the scheduling window is
-//! one second and not longer.
+//! MEASURED ON THE fr165 TARGET (not assumed):
+//!   Attention has :playTone      true
+//!   Attention has :ToneProfile   true
+//!   playTone profile elements    32+ accepted
+//!   playTone :repeatCount        accepted up to at least 10000
+//!   vibrate profile elements     8 maximum
+//!   vibrate with 10 elements     UNCATCHABLE "Too Many Arguments Error" that
+//!                                takes the data field down. try/catch does
+//!                                NOT save you. Never exceed 8.
 class Cue {
-
-    // How far ahead each output is scheduled.
-    //
-    // The horizon MUST exceed the wake-up interval, or a late compute() leaves
-    // an audible hole. compute() is nominally 1 Hz, so 1500ms tolerates a
-    // wake-up running 500ms late. Measured on the fr165 target: playTone
-    // accepts at least 32 profile elements, and 220spm over 1500ms needs 12,
-    // so the tone side has room to spare.
-    const TONE_HORIZON_MS = 1500;
-
-    // Vibration has no such room. MEASURED: Attention.vibrate with 10 elements
-    // raises an UNCATCHABLE "Too Many Arguments Error" that takes the data
-    // field down with it -- try/catch does not save you. 8 is a hard ceiling,
-    // enforced by truncation below, and the vibe horizon is simply whatever
-    // fits inside it.
-    const VIBE_MAX_ELEMENTS = 8;
 
     // Beat character. Short and high cuts through road noise and wind better
     // than a long low tone, and a short beat leaves a clean gap at high spm.
-    // Beats are always full length: one clipped at the end of a horizon is
-    // re-queued by the next wake-up, so there is nothing to shorten for.
     const BEAT_FREQ_HZ = 2000;
     const BEAT_MS = 40;
     const BEAT_VIBE_DUTY = 65;
+
+    // Vibration is topped up once per wake-up and must never exceed this.
+    const VIBE_MAX_ELEMENTS = 8;
+    const VIBE_HORIZON_MS = 1000;
 
     // Deviation alert: a rising pair means "speed up", falling means
     // "slow down". Deliberately longer and two-toned so it is never confused
@@ -62,9 +51,8 @@ class Cue {
         _hasVibrate = (Attention has :vibrate);
     }
 
-    //! How far ahead to schedule. Exposed as a method because Monkey C class
-    //! consts are not reliably reachable as Cue.TONE_HORIZON_MS from outside.
-    public function horizonMs() as Number { return TONE_HORIZON_MS; }
+    public function beatMs() as Number { return BEAT_MS; }
+    public function vibeHorizonMs() as Number { return VIBE_HORIZON_MS; }
 
     public function hasTone() as Boolean { return _hasTone; }
     public function hasToneProfile() as Boolean { return _hasToneProfile; }
@@ -91,31 +79,99 @@ class Cue {
         return true;
     }
 
-    //! Queue one window of beats.
-    //! @param offsetsMs beat offsets from the window start, ascending
-    //! @param config    user cue preferences
-    public function playBeats(offsetsMs as Array<Number>, config as Config) as Void {
-        if (offsetsMs.size() == 0) { return; }
-
-        if (config.wantsTone() && tonesAudible()) {
-            if (_hasToneProfile) {
-                queueToneWindow(offsetsMs);
-            } else {
-                // Device has no ToneProfile support: degrade to a single beep
-                // on the first beat of the window. Rhythmically useless as a
-                // metronome, but better than silence -- and MetronomeView
-                // tells the user their device is in degraded mode.
-                safePlayTone(Attention.TONE_KEY);
-            }
+    //! Hand the firmware one beat period and let it loop.
+    //!
+    //! The profile is exactly `intervalMs` long:
+    //!     [rest leadInMs] [beat BEAT_MS] [rest intervalMs - BEAT_MS - leadInMs]
+    //! so every repetition places a beat one interval after the last. Putting
+    //! the lead-in INSIDE the repeating profile, and shortening the tail to
+    //! match, is what lets Metronome re-arm without shifting the phase.
+    //!
+    //! @return true if the firmware accepted it
+    public function armBeat(intervalMs as Number, leadInMs as Number,
+                            repeats as Number, config as Config) as Boolean {
+        if (!config.wantsTone() || !_hasToneProfile || !tonesAudible()) {
+            return false;
         }
 
-        if (config.wantsVibe() && vibeEnabled()) {
-            queueVibeWindow(offsetsMs);
+        var tail = intervalMs - BEAT_MS - leadInMs;
+        if (tail < 0) {
+            // Metronome should never ask for this; refuse rather than emit a
+            // profile whose length is not exactly one interval.
+            return false;
+        }
+
+        var profile = [];
+        if (leadInMs > 0) {
+            profile.add(new Attention.ToneProfile(0, leadInMs));
+        }
+        profile.add(new Attention.ToneProfile(BEAT_FREQ_HZ, BEAT_MS));
+        if (tail > 0) {
+            profile.add(new Attention.ToneProfile(0, tail));
+        }
+
+        try {
+            Attention.playTone({ :toneProfile => profile, :repeatCount => repeats });
+            return true;
+        } catch (e) {
+            return false;
         }
     }
 
-    //! The out of range alert. Played INSTEAD of that window's beats so the
-    //! two cues never overlap and fight for the buzzer.
+    //! Replace the looping profile with a moment of silence, which is the only
+    //! way to stop it. Used on pause and on stop -- otherwise the firmware
+    //! would happily keep beating for the rest of the arming window.
+    public function silenceTone(config as Config) as Void {
+        if (!_hasTone || !_hasToneProfile) { return; }
+        try {
+            Attention.playTone({
+                :toneProfile => [new Attention.ToneProfile(0, 1)],
+                :repeatCount => 1
+            });
+        } catch (e) {
+            // Nothing useful to do; the arming will expire on its own.
+        }
+    }
+
+    //! Top up the vibration for the next window. Unlike the tone this must be
+    //! re-issued every wake-up, because Attention.vibrate has no repeat.
+    //!
+    //! HARD truncated to VIBE_MAX_ELEMENTS: going over does not throw
+    //! something catchable, it kills the data field.
+    //!
+    //! Forerunners flatten pattern intensity, so the duty cycle mostly only
+    //! decides "buzzing or not" -- the DURATIONS carry the rhythm.
+    public function pulseVibe(offsetsMs as Array<Number>, config as Config) as Void {
+        if (!config.wantsVibe() || !vibeEnabled() || offsetsMs.size() == 0) {
+            return;
+        }
+
+        var profile = [];
+        var cursor = 0;
+
+        for (var i = 0; i < offsetsMs.size(); i++) {
+            if (profile.size() + 2 > VIBE_MAX_ELEMENTS) { break; }
+
+            var at = offsetsMs[i];
+            if (at > cursor) {
+                profile.add(new Attention.VibeProfile(0, at - cursor));
+                cursor = at;
+            }
+            profile.add(new Attention.VibeProfile(BEAT_VIBE_DUTY, BEAT_MS));
+            cursor = at + BEAT_MS;
+        }
+
+        if (profile.size() == 0) { return; }
+
+        try {
+            Attention.vibrate(profile);
+        } catch (e) {
+            // A missed buzz is not worth ending the activity for.
+        }
+    }
+
+    //! The out of range alert. Interrupts the looping beat -- there is only
+    //! one buzzer -- and Metronome re-arms afterwards.
     public function playDeviation(tooFast as Boolean, config as Config) as Void {
         if (config.wantsTone() && tonesAudible()) {
             if (_hasToneProfile) {
@@ -145,73 +201,6 @@ class Cue {
             } catch (e) {
                 // Never let a cue failure end the run.
             }
-        }
-    }
-
-    //! Build [rest, beat, rest, beat, ...] over the whole horizon and hand it
-    //! to the firmware in one call. Whatever is still unplayed when the next
-    //! wake-up arrives gets cancelled and re-queued by the scheduler, so the
-    //! tail needs no special handling.
-    private function queueToneWindow(offsetsMs as Array<Number>) as Void {
-        var profile = [];
-        var cursor = 0;
-
-        for (var i = 0; i < offsetsMs.size(); i++) {
-            var at = offsetsMs[i];
-
-            // Silence up to this beat. A zero frequency element is the
-            // documented way to express a rest inside a tone profile.
-            if (at > cursor) {
-                profile.add(new Attention.ToneProfile(0, at - cursor));
-                cursor = at;
-            }
-
-            profile.add(new Attention.ToneProfile(BEAT_FREQ_HZ, BEAT_MS));
-            cursor = at + BEAT_MS;
-        }
-
-        if (profile.size() == 0) { return; }
-
-        try {
-            Attention.playTone({ :toneProfile => profile });
-        } catch (e) {
-            // Some firmware rejects an oversized profile. Drop to a single
-            // beep rather than going silent or crashing.
-            safePlayTone(Attention.TONE_KEY);
-        }
-    }
-
-    //! Same idea for the vibration motor, but HARD truncated to
-    //! VIBE_MAX_ELEMENTS: going over does not throw something catchable, it
-    //! kills the data field. The vibe cue therefore covers less of the horizon
-    //! than the tone does at high cadence, which is an acceptable trade -- the
-    //! tone carries the rhythm and the next wake-up tops the vibration up.
-    //!
-    //! Forerunners flatten pattern intensity, so the duty cycle mostly only
-    //! decides "buzzing or not" -- the DURATIONS carry the rhythm.
-    private function queueVibeWindow(offsetsMs as Array<Number>) as Void {
-        var profile = [];
-        var cursor = 0;
-
-        for (var i = 0; i < offsetsMs.size(); i++) {
-            if (profile.size() + 2 > VIBE_MAX_ELEMENTS) { break; }
-
-            var at = offsetsMs[i];
-            if (at > cursor) {
-                profile.add(new Attention.VibeProfile(0, at - cursor));
-                cursor = at;
-            }
-
-            profile.add(new Attention.VibeProfile(BEAT_VIBE_DUTY, BEAT_MS));
-            cursor = at + BEAT_MS;
-        }
-
-        if (profile.size() == 0) { return; }
-
-        try {
-            Attention.vibrate(profile);
-        } catch (e) {
-            // A missed buzz is not worth ending the activity for.
         }
     }
 

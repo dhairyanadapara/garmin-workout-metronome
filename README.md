@@ -6,15 +6,15 @@ The Forerunner 165 has no built-in metronome (the 255/265/955 do). Every metrono
 
 ## How it beats, given a data field can't use a timer
 
-`compute()` fires roughly once a second and `Toybox.Timer` is unavailable, so the app can never be awake for an individual beat. `Attention.playTone` takes a *relative* profile — an array of (frequency, duration) pairs — and a new call **cancels** whatever is still playing.
+`compute()` fires roughly once a second and `Toybox.Timer` is unavailable, so the app can never be awake for an individual beat. And critically, **a new `Attention.playTone` cancels whatever is still playing** - so feeding the firmware a fresh profile every second clips a beat mid-flight about one wake-up in nine, which is audible as a missing beat.
 
-So the app uses the standard software-metronome architecture: **look-ahead scheduling on an absolute timeline**, the pattern behind DAWs, drum machines and Web Audio's "two clocks".
+So the app does not feed the firmware. It **arms** it:
 
-> Beats live at absolute times (`t0 + n × interval`). Each wake-up emits every beat due in `[now, now + 1500ms)` as offsets from *now* — a horizon deliberately longer than the wake-up interval, so a late wake-up leaves no hole. Because the schedule is recomputed from the clock, it is **idempotent**: a duplicate wake-up re-queues the same beats instead of corrupting the phase.
+> `playTone` accepts `:repeatCount`. The beat pattern is issued **once**, as a profile exactly one beat period long, and the firmware loops it on its own hardware clock. The rhythm comes from hardware timing, not from our wake-up clock, so it is even by construction - nothing interrupts it.
 
-That one property handles the whole family of clock misbehaviours — the double `compute()` at activity start, jitter, late wake-ups, long pauses, even the timer wrapping — with no special cases. Full rationale and measurements: [docs/SCHEDULING.md](docs/SCHEDULING.md).
+Measured on target: one arming covers **10 minutes** (1699 repeats of a 353 ms profile), and across 40 subsequent wake-ups there were **zero** further tone calls. Re-arming is phase-accurate to 1 ms and only ever happens at a moment when no beat is sounding.
 
-Measured on the FR165 simulator across 52 wake-ups including a duplicate: **0 dropped beats, gaps only 352–353 ms, worst deviation 1 ms, exactly 170.0 spm.**
+Getting here took two wrong designs, both caught by onset analysis of screen recordings - 10 dropped beats per minute, then 2. Full rationale and measurements: [docs/SCHEDULING.md](docs/SCHEDULING.md). **Read it before changing the scheduler.**
 
 ## Features
 
@@ -30,7 +30,8 @@ Measured on the FR165 simulator across 52 wake-ups including a duplicate: **0 dr
 source/
   WorkoutMetronomeApp.mc   AppBase; forwards phone settings pushes to the view
   MetronomeView.mc         the data field: compute() cues, onUpdate() only draws
-  BeatScheduler.mc         look-ahead scheduler on an absolute timeline
+  BeatGrid.mc              the absolute beat timeline
+  Metronome.mc             arms the firmware to loop the beat, and re-arms safely
   Cue.mc                   everything touching Toybox.Attention, behind capability checks
   CadenceMonitor.mc        rolling average + hysteresis for the off-target alert
   Config.mc                crash-proof typed reads of app settings
