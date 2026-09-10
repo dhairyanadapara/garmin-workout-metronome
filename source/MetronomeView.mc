@@ -110,9 +110,14 @@ class MetronomeView extends WatchUi.DataField {
         if (info has :timerState && info.timerState != null) {
             return info.timerState;
         }
-        // Very old API levels omit timerState. Treat elapsed time moving as
-        // "running" -- but minApiLevel is 3.2 so this is belt and braces.
-        return Activity.TIMER_STATE_ON;
+        // Unknown timer state means we are NOT inside a running activity, so
+        // stay silent. An earlier version defaulted to ON here, on the theory
+        // that a device without timerState should still get a metronome. That
+        // was backwards: timerState is genuinely nullable (the API types it
+        // "Null or Activity.TimerState"), and defaulting to ON makes the field
+        // beep on the pre-start screen, before the runner has started anything.
+        // Silence is the safe direction to fail in.
+        return Activity.TIMER_STATE_OFF;
     }
 
     //! Drawing only. Never cue from here: onUpdate does not run when the page

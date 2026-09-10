@@ -63,6 +63,29 @@ What the simulator still cannot tell us, and the watch must:
 
 Questions 1 and 3 are the ones that can kill the design.
 
+## Running it in the simulator
+
+```
+toolsuild.cmd spike
+```
+
+**The simulator reports `timerState 0` (TIMER_STATE_OFF) until you press START
+on the simulated watch.** The spike therefore cues REGARDLESS of timer state,
+so it makes noise the moment it loads -- otherwise you would sit in silence
+wondering whether the build was broken.
+
+The main app does respect timer state, so to hear *that* in the simulator you
+must press START (or use Simulation > Activity Data) first. It shows PAUSED in
+the header until you do.
+
+The spike's fourth line reports the raw value, so there is never any guessing:
+
+```
+tick 24  cued 24     <- compute() calls, and how many actually cued
+timerState 0         <- 0=OFF 1=STOPPED 2=PAUSED 3=ON, or "null"/"absent"
+tone ok              <- last cue result
+```
+
 ## Build and load
 
 ```bash

@@ -43,6 +43,8 @@ class SpikeField extends WatchUi.DataField {
     private var _tonesOn as Boolean = false;
     private var _vibeOn as Boolean = false;
     private var _lastError as String = "-";
+    private var _timerState as String = "?";
+    private var _cued as Number = 0;
 
     // Alternate tone-only and vibe-only seconds so the two outputs can be
     // judged separately by ear/wrist instead of masking each other.
@@ -63,13 +65,23 @@ class SpikeField extends WatchUi.DataField {
     public function compute(info as Activity.Info) as Void {
         _ticks++;
 
-        // Only cue while the timer is genuinely running, so the spike does not
-        // beep at you on the pre-start screen.
-        if (!(info has :timerState) || info.timerState != Activity.TIMER_STATE_ON) {
-            return;
+        // Report the raw timer state. The simulator reports NULL here unless
+        // an activity is actually recording, which is worth seeing rather
+        // than silently guessing at.
+        if (!(info has :timerState)) {
+            _timerState = "absent";
+        } else if (info.timerState == null) {
+            _timerState = "null";
+        } else {
+            _timerState = info.timerState.toString();
         }
 
+        // Deliberately cue REGARDLESS of timer state. This is a throwaway
+        // capability probe: making it depend on a recording activity just
+        // makes it harder to run, and hearing it beep on the pre-start screen
+        // is harmless here.
         _phase = (_phase + 1) % 2;
+        _cued++;
 
         if (_phase == 0) {
             tryToneWindow();
@@ -99,7 +111,7 @@ class SpikeField extends WatchUi.DataField {
                     new Attention.ToneProfile(2000, 40)
                 ]
             });
-            _lastError = "ok";
+            _lastError = "tone ok";
         } catch (e) {
             _lastError = "profile threw";
             try { Attention.playTone(Attention.TONE_KEY); } catch (e2) {}
@@ -117,6 +129,7 @@ class SpikeField extends WatchUi.DataField {
                 new Attention.VibeProfile(0, 260),
                 new Attention.VibeProfile(65, 40)
             ]);
+            _lastError = "vibe ok";
         } catch (e) {
             _lastError = "vibe threw";
         }
@@ -140,7 +153,10 @@ class SpikeField extends WatchUi.DataField {
         dc.drawText(cx, y, f, "snd" + _tonesOn.toString() + " vib" + _vibeOn.toString(),
                     Graphics.TEXT_JUSTIFY_CENTER);
         y += lh;
-        dc.drawText(cx, y, f, "tick " + _ticks.format("%d"), Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, y, f, "tick " + _ticks.format("%d")
+                    + "  cued " + _cued.format("%d"), Graphics.TEXT_JUSTIFY_CENTER);
+        y += lh;
+        dc.drawText(cx, y, f, "timerState " + _timerState, Graphics.TEXT_JUSTIFY_CENTER);
         y += lh;
         dc.drawText(cx, y, f, _lastError, Graphics.TEXT_JUSTIFY_CENTER);
     }
