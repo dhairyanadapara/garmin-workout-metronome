@@ -5,6 +5,7 @@
 #   tools/build.sh device        build the app for the watch      (default)
 #   tools/build.sh test          build AND run the unit tests
 #   tools/build.sh spike         build AND run the Phase 1 spike in the simulator
+#   tools/build.sh probe         build AND run the timing-ruler measurement probe
 #   tools/build.sh release       build the signed .iq for the store
 #
 # Second argument overrides the target device, e.g. tools/build.sh device fr165m
@@ -108,13 +109,19 @@ case "$CMD" in
     echo "Built spike/bin/spike.prg for $DEVICE -- see docs/SPIKE.md"
     run_in_simulator spike/bin/spike.prg
     ;;
+  probe)
+    mkdir -p probe/bin
+    ( cd probe && monkeyc -f monkey.jungle -o bin/probe.prg -y "$KEY" -d "$DEVICE" -w )
+    run_in_simulator probe/bin/probe.prg
+    echo "Timing ruler armed -- record ~30s, see docs/SCHEDULING.md"
+    ;;
   release)
     # -e exports the multi-device .iq bundle for the store; -r is release mode.
     monkeyc -e -f monkey.jungle -o bin/WorkoutMetronome.iq -y "$KEY" -w -r
     echo "Built bin/WorkoutMetronome.iq -- upload this to apps.garmin.com"
     ;;
   *)
-    echo "Unknown command '$CMD'. Use: sim | device | test | spike | release" >&2
+    echo "Unknown command '$CMD'. Use: sim | device | test | spike | probe | release" >&2
     exit 1
     ;;
 esac

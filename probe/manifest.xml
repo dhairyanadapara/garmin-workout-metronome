@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<!-- Throwaway measurement probe. Never submitted to the store. -->
+<iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="3">
+    <iq:application entry="RulerApp"
+                    id="bdcffafe306f4e7d8d478320ad309561"
+                    launcherIcon="@Drawables.LauncherIcon"
+                    minApiLevel="3.2.0"
+                    name="@Strings.AppName"
+                    type="datafield"
+                    version="0.0.1">
+        <iq:products>
+            <iq:product id="fr165"/>
+            <iq:product id="fr165m"/>
+        </iq:products>
+        <iq:permissions/>
+        <iq:languages>
+            <iq:language>eng</iq:language>
+        </iq:languages>
+    </iq:application>
+</iq:manifest>
