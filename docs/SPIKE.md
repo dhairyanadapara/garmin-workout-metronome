@@ -8,6 +8,32 @@ The product rests on one thing that no documentation confirms and no simulator c
 
 The docs say `playTone` accepts `:toneProfile` and that data fields may call it. They do not say what happens when you call it again a second later while the previous profile may still be playing, and they do not say whether FR165 firmware honours the durations faithfully. Those are the questions.
 
+## Already answered by the fr165 simulator
+
+A capability probe run against the real `fr165` target settled the "does the
+API even exist here" half of the question, so the spike now only has to answer
+the hardware-behaviour half:
+
+| Probe | Result |
+|---|---|
+| `Attention has :playTone` | true |
+| `Attention has :ToneProfile` | **true** |
+| `Attention has :vibrate` / `:VibeProfile` | true |
+| 3-element tone profile | accepted, no throw |
+| 8-element tone profile (worst case, 220 spm) | accepted, no throw |
+| Screen / memory | 390x390, field uses 13.5kB of 252.5kB |
+
+So the degraded "no ToneProfile" fallback path in `Cue` will not be taken on
+this device, and profiles are not rejected for size.
+
+What the simulator still cannot tell us, and the watch must:
+
+1. Whether a second `playTone` **cancels** a profile that is still playing.
+2. Whether the firmware honours the **durations** evenly, or drifts/stutters.
+3. Whether `compute()` really keeps running when the field is **off-screen**.
+
+Questions 1 and 3 are the ones that can kill the design.
+
 ## Build and load
 
 ```bash

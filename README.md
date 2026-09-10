@@ -48,15 +48,17 @@ docs/
 
 | Phase | State |
 |---|---|
-| 0 · Toolchain | 🟡 SDK 9.2.0 + Java 17 + signing key all set; **FR165 device profile still needs installing** via SDK Manager |
-| 1 · Hardware capability spike | ⏳ built and ready to sideload — see [docs/SPIKE.md](docs/SPIKE.md) |
+| 0 · Toolchain | ✅ SDK 9.2.0, Java 17, signing key, FR165 + FR165M device profiles |
+| 1 · Hardware capability spike | 🟡 API side confirmed on the fr165 target; **on-watch timing test still required** — see [docs/SPIKE.md](docs/SPIKE.md) |
 | 2 · Core metronome | ✅ builds clean, 8/8 unit tests pass |
 | 3 · Off-target alert | ✅ builds clean |
 | 4 · Settings & polish | ✅ builds clean |
-| 5 · Testing | 🟡 unit tests green; simulator + on-device matrix pending FR165 |
+| 5 · Testing | 🟡 8/8 unit tests green on fr165; field renders correctly in the FR165 simulator; on-device matrix pending |
 | 6 · Store submission | ⏳ see [docs/STORE.md](docs/STORE.md) |
 
-Verified so far against SDK 9.2.0 (built for `fenix6` as a stand-in until the FR165 profile is installed): app, tests and spike all **BUILD SUCCESSFUL** with warnings on, and **all 8 scheduler tests pass** — `testNoDriftOverAnHour` reporting `beats=10381 expected=10380 error=1`, matching the independent model exactly.
+Verified against SDK 9.2.0 on the real `fr165` target: app, tests and spike all **build with zero warnings**; **8/8 scheduler tests pass** (`testNoDriftOverAnHour` → `beats=10381 expected=10380 error=1`, matching the independent model exactly); the field renders correctly in the FR165 simulator using 13.5 kB of 252.5 kB.
+
+A runtime capability probe on `fr165` confirms `Attention has :ToneProfile` is **true** and that both 3-element and 8-element tone profiles are accepted without throwing — so the degraded fallback path won't be taken on this device.
 
 **Phase 1 is a genuine gate.** If the FR165 turns out to cancel a queued tone profile on each new `playTone` call, tone mode degrades to one beep per second and vibration becomes the primary cue. That assumption cannot be tested without the watch.
 
