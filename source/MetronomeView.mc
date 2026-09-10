@@ -70,7 +70,7 @@ class MetronomeView extends WatchUi.DataField {
         // Always advance the scheduler's phase, even on an alert tick, so the
         // beat grid stays aligned to the wall clock rather than shifting by a
         // second every time the runner drifts out of range.
-        var offsets = _scheduler.nextWindow(_cue.windowMs());
+        var offsets = _scheduler.nextWindow(_cue.windowMs(), _cue.minBeatMs());
 
         if (shouldAlert) {
             // The alert replaces this window's beats. Overlapping them would

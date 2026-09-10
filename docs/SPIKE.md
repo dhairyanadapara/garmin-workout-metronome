@@ -8,6 +8,35 @@ The product rests on one thing that no documentation confirms and no simulator c
 
 The docs say `playTone` accepts `:toneProfile` and that data fields may call it. They do not say what happens when you call it again a second later while the previous profile may still be playing, and they do not say whether FR165 firmware honours the durations faithfully. Those are the questions.
 
+## RESOLVED: the dropped beat (2026-09-10)
+
+Two screen recordings of the simulator at 170spm, analysed by onset detection,
+settled question 1 before the watch was ever involved.
+
+**60-second recording:** 161 beats at 2000Hz, median gap 353.0ms (= exactly
+170spm), and **10 dropped beats** at t = 6.1, 12.1, 18.1, 24.1, 30.1, 36.1,
+42.1, 48.1, 54.1, 60.1s -- one every 6.01 seconds, with gaps of 685-705ms
+against the 353ms interval. Shortest burst measured 9.7ms against a 40ms beat.
+
+**Cause.** A `playTone` call CANCELS a profile that is still playing. At 170spm
+the phase carry cycles such that every 6th window places a beat at ~999ms; the
+next second's call arrives ~1ms later and cuts it to silence. The truncated
+9.7ms bursts are the same effect caught mid-beat.
+
+**Fix.** `BeatScheduler.nextWindow` now takes a `minBeatMs` guard and will not
+schedule a beat without room to sound; such a beat carries into the next
+window at offset 0, late by under 15ms instead of missing. `Cue` shortens a
+beat that fits but cannot run full length, which costs nothing perceptually
+because rhythm is carried by the ONSET, not the duration.
+
+Modelled across 100-220spm: **zero drops, mean timing error under 1.1ms**,
+worst case bounded by the 15ms guard, beat counts exact over 30 minutes.
+Locked in by `testNoBeatIsTruncated` and `testNoDroppedBeatsOverTime`.
+
+**Still open, and watch-only:** whether FR165 firmware honours profile
+durations as faithfully as the simulator does, and whether `compute()` keeps
+running while the field is off-screen.
+
 ## Already answered by the fr165 simulator
 
 A capability probe run against the real `fr165` target settled the "does the

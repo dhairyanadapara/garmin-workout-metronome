@@ -10,14 +10,35 @@ import Toybox.Lang;
 //! second window, and hand that whole window to the firmware as a single
 //! queued tone/vibe profile.
 //!
-//! The trap this class exists to avoid: if you restart the beat phase at each
-//! compute() tick, the beat silently drifts against the wall clock and the
-//! rhythm stutters once per second. Instead we carry the fractional remainder
-//! of the last window forward, in microseconds, using exact integer maths.
+//! TWO TRAPS THIS CLASS EXISTS TO AVOID
+//!
+//! 1. PHASE DRIFT. If you restart the beat phase at each compute() tick, the
+//!    beat drifts against the wall clock and the rhythm stutters once per
+//!    second. Instead we carry the fractional remainder of the last window
+//!    forward, in microseconds, using exact integer maths.
+//!
+//! 2. THE TRUNCATED TAIL. A recording of the running metronome showed a beat
+//!    vanishing every ~6 seconds at 170spm -- gaps of 706ms against a 353ms
+//!    interval. The cause: when the next second's playTone call arrives, the
+//!    firmware CANCELS whatever of the previous profile is still playing. Any
+//!    beat scheduled in the last few milliseconds of a window was therefore
+//!    silently cut to nothing.
+//!
+//!    So a beat is only scheduled if at least `minBeatMs` of it can sound
+//!    before the window ends. One that cannot is carried into the next window
+//!    and lands at offset 0 there -- late by less than minBeatMs, rather than
+//!    missing altogether. Beats that fit but cannot run full length are
+//!    shortened in place by Cue, which costs nothing perceptually: rhythm is
+//!    carried by a beat's ONSET, not its duration.
 class BeatScheduler {
 
     // Microseconds until the next beat, measured from the START of the next
-    // window we are asked to fill. Always in [0, _intervalUs).
+    // window we are asked to fill.
+    //
+    // Usually in [0, _intervalUs). It can be slightly NEGATIVE -- down to
+    // -minBeatUs -- when a beat was carried over from the previous window
+    // because it could not finish there. A negative carry means "this beat was
+    // due just before now", and it is emitted at offset 0.
     private var _carryUs as Number = 0;
 
     // Microseconds between beats.
@@ -61,23 +82,40 @@ class BeatScheduler {
         _carryUs = 0;
     }
 
-    //! Every beat offset (in ms, relative to the window start) that falls
-    //! inside the next `windowMs` window, and advance the phase.
+    //! Every beat offset (in ms, relative to the window start) that can
+    //! actually SOUND inside the next `windowMs` window, and advance the phase.
     //!
     //! Call this EXACTLY ONCE per window you actually play. Calling it twice
     //! without playing the first window advances the phase and loses beats.
-    public function nextWindow(windowMs as Number) as Array<Number> {
+    //!
+    //! @param windowMs    length of the window being filled
+    //! @param minBeatMs   shortest beat worth scheduling; a beat with less
+    //!                    room than this defers to the next window
+    public function nextWindow(windowMs as Number, minBeatMs as Number) as Array<Number> {
         var windowUs = windowMs * 1000;
+        var minBeatUs = minBeatMs * 1000;
         var offsets = [] as Array<Number>;
 
         var atUs = _carryUs;
-        while (atUs < windowUs) {
-            offsets.add(atUs / 1000);
+
+        // Only schedule a beat that has room to be heard. This is the guard
+        // against the truncated tail described above.
+        while (atUs + minBeatUs <= windowUs) {
+            var offsetUs = atUs;
+            if (offsetUs < 0) {
+                // Carried over from the previous window: play it immediately.
+                offsetUs = 0;
+            }
+            offsets.add(offsetUs / 1000);
+
+            // Advance by the TRUE interval, not from the clamped offset, so
+            // carrying a beat over never shifts the underlying grid.
             atUs += _intervalUs;
         }
 
-        // Carry the overshoot into the next window. This is the whole point:
-        // the phase is continuous across the 1 Hz compute() boundary.
+        // Carry the overshoot -- or the shortfall, if we stopped early to
+        // avoid a truncated beat -- into the next window. This is the whole
+        // point: the phase is continuous across the 1 Hz compute() boundary.
         _carryUs = atUs - windowUs;
 
         return offsets;

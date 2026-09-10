@@ -31,6 +31,13 @@ class Cue {
     const BEAT_MS = 40;
     const BEAT_VIBE_DUTY = 65;
 
+    // The shortest beat still worth playing. A profile is CANCELLED by the
+    // next second's playTone call, so a beat near the end of a window gets
+    // cut short; below this length it would be inaudible, and BeatScheduler
+    // defers it to the next window instead. Measured from a recording: at
+    // 170spm the un-guarded version silently dropped a beat every ~6s.
+    const MIN_BEAT_MS = 15;
+
     // Deviation alert: a rising pair means "speed up", falling means
     // "slow down". Deliberately longer and two-toned so it is never confused
     // with a beat.
@@ -54,6 +61,10 @@ class Cue {
     //! The scheduling window length. Exposed as a method because Monkey C
     //! class consts are not reliably reachable as Cue.WINDOW_MS from outside.
     public function windowMs() as Number { return WINDOW_MS; }
+
+    //! Shortest beat worth scheduling; BeatScheduler needs this to decide
+    //! whether a beat has room to sound before the window ends.
+    public function minBeatMs() as Number { return MIN_BEAT_MS; }
 
     public function hasTone() as Boolean { return _hasTone; }
     public function hasToneProfile() as Boolean { return _hasToneProfile; }
@@ -153,14 +164,18 @@ class Cue {
                 cursor = at;
             }
 
-            // Deliberately NOT clamped to WINDOW_MS. A beat landing in the
-            // last few ms of the window would be truncated to an inaudible
-            // click, which is a far worse artefact than letting the profile
-            // overrun the window by up to BEAT_MS. The overrun is harmless:
-            // the next window is queued a full second later, long after this
-            // tail has finished.
-            profile.add(new Attention.ToneProfile(BEAT_FREQ_HZ, BEAT_MS));
-            cursor = at + BEAT_MS;
+            // Shorten the beat rather than let it overrun the window. The
+            // firmware cancels an unfinished profile when the next second's
+            // playTone arrives, so an overrunning beat is not merely clipped
+            // -- it can vanish. Shortening costs nothing perceptually because
+            // rhythm is carried by the ONSET, and BeatScheduler guarantees at
+            // least MIN_BEAT_MS of room here.
+            var beatMs = BEAT_MS;
+            if (at + beatMs > WINDOW_MS) {
+                beatMs = WINDOW_MS - at;
+            }
+            profile.add(new Attention.ToneProfile(BEAT_FREQ_HZ, beatMs));
+            cursor = at + beatMs;
         }
 
         if (profile.size() == 0) { return; }
@@ -190,9 +205,13 @@ class Cue {
                 cursor = at;
             }
 
-            // Full-length buzz for the same reason as the tone above.
-            profile.add(new Attention.VibeProfile(BEAT_VIBE_DUTY, BEAT_MS));
-            cursor = at + BEAT_MS;
+            // Shortened at the window edge for the same reason as the tone.
+            var beatMs = BEAT_MS;
+            if (at + beatMs > WINDOW_MS) {
+                beatMs = WINDOW_MS - at;
+            }
+            profile.add(new Attention.VibeProfile(BEAT_VIBE_DUTY, beatMs));
+            cursor = at + beatMs;
         }
 
         if (profile.size() == 0) { return; }
