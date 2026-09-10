@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Defaults for every setting. These keys are read by Config.mc. Keep the ids
+  and the types in sync with source/Config.mc and settings.xml.
+-->
+<properties>
+    <property id="targetSpm" type="number">170</property>
+    <property id="stepsPerBeat" type="number">1</property>
+    <property id="cueMode" type="number">2</property>
+
+    <property id="deviationEnabled" type="boolean">true</property>
+    <property id="deviationPercent" type="number">5</property>
+    <property id="deviationCooldownSec" type="number">10</property>
+    <property id="deviationConfirmTicks" type="number">3</property>
+
+</properties>

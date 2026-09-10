@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Store / launcher name. Garmin store rules forbid "Garmin" in an app name. -->
+    <string id="AppName">Workout Metronome</string>
+
+    <!-- Data field header states -->
+    <string id="LabelName">CADENCE</string>
+    <string id="LabelPaused">PAUSED</string>
+    <string id="LabelMuted">MUTED</string>
+    <string id="LabelDegraded">VIBE ONLY</string>
+
+    <!-- Settings screen (Garmin Connect Mobile) -->
+    <string id="SettingTargetSpm">Target cadence (steps/min)</string>
+    <string id="SettingTargetSpmPrompt">Your goal cadence. 170-180 suits most runners.</string>
+
+    <string id="SettingStepsPerBeat">Beat on</string>
+    <string id="SettingStepsPerBeatPrompt">How often to beat. Every other step is easier to follow at high cadence.</string>
+    <string id="StepsPerBeat1">Every step</string>
+    <string id="StepsPerBeat2">Every other step</string>
+    <string id="StepsPerBeat4">Every 4th step</string>
+
+    <string id="SettingCueMode">Beat using</string>
+    <string id="SettingCueModePrompt">Tone needs watch sounds turned on.</string>
+    <string id="CueTone">Tone</string>
+    <string id="CueVibe">Vibration</string>
+    <string id="CueBoth">Tone and vibration</string>
+
+    <string id="SettingDeviationEnabled">Off-target alert</string>
+    <string id="SettingDeviationEnabledPrompt">Alert when your cadence drifts outside the target band.</string>
+
+    <string id="SettingDeviationPercent">Alert band (%)</string>
+    <string id="SettingDeviationPercentPrompt">How far off target before alerting, above or below.</string>
+
+    <string id="SettingDeviationCooldown">Alert cooldown (seconds)</string>
+    <string id="SettingDeviationCooldownPrompt">Minimum gap between off-target alerts.</string>
+
+    <string id="SettingDeviationConfirmTicks">Alert delay (seconds)</string>
+    <string id="SettingDeviationConfirmTicksPrompt">Seconds off target before alerting. Higher is less naggy.</string>
+</resources>

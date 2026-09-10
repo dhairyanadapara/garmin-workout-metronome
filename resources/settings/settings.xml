@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The settings screen shown in Garmin Connect Mobile > the device > Activities
+  & App Management > Data Fields > Workout Metronome > Settings.
+
+  Data field settings CANNOT be edited on the watch. Say so in the store
+  listing: users who go looking for on-watch settings and cannot find them are
+  the single most common source of one-star data field reviews.
+-->
+<settings>
+    <setting propertyKey="@Properties.targetSpm" title="@Strings.SettingTargetSpm"
+             prompt="@Strings.SettingTargetSpmPrompt">
+        <settingConfig type="numeric" min="100" max="220"/>
+    </setting>
+
+    <setting propertyKey="@Properties.stepsPerBeat" title="@Strings.SettingStepsPerBeat"
+             prompt="@Strings.SettingStepsPerBeatPrompt">
+        <settingConfig type="list">
+            <listEntry value="1">@Strings.StepsPerBeat1</listEntry>
+            <listEntry value="2">@Strings.StepsPerBeat2</listEntry>
+            <listEntry value="4">@Strings.StepsPerBeat4</listEntry>
+        </settingConfig>
+    </setting>
+
+    <setting propertyKey="@Properties.cueMode" title="@Strings.SettingCueMode"
+             prompt="@Strings.SettingCueModePrompt">
+        <settingConfig type="list">
+            <listEntry value="0">@Strings.CueTone</listEntry>
+            <listEntry value="1">@Strings.CueVibe</listEntry>
+            <listEntry value="2">@Strings.CueBoth</listEntry>
+        </settingConfig>
+    </setting>
+
+    <setting propertyKey="@Properties.deviationEnabled" title="@Strings.SettingDeviationEnabled"
+             prompt="@Strings.SettingDeviationEnabledPrompt">
+        <settingConfig type="boolean"/>
+    </setting>
+
+    <setting propertyKey="@Properties.deviationPercent" title="@Strings.SettingDeviationPercent"
+             prompt="@Strings.SettingDeviationPercentPrompt">
+        <settingConfig type="numeric" min="1" max="30"/>
+    </setting>
+
+    <setting propertyKey="@Properties.deviationConfirmTicks" title="@Strings.SettingDeviationConfirmTicks"
+             prompt="@Strings.SettingDeviationConfirmTicksPrompt">
+        <settingConfig type="numeric" min="1" max="10"/>
+    </setting>
+
+    <setting propertyKey="@Properties.deviationCooldownSec" title="@Strings.SettingDeviationCooldown"
+             prompt="@Strings.SettingDeviationCooldownPrompt">
+        <settingConfig type="numeric" min="3" max="60"/>
+    </setting>
+</settings>
