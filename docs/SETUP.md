@@ -55,11 +55,15 @@ This key is **already generated** - the block above is only for recreating it. P
 ## 5. Build
 
 ```bash
-tools/build.sh device      # app -> bin/WorkoutMetronome.prg
+tools/build.sh sim         # build AND run in the simulator
 tools/build.sh test        # build + run the unit tests in the simulator
-tools/build.sh spike       # the Phase 1 capability probe
+tools/build.sh device      # app -> bin/WorkoutMetronome.prg, for sideloading
+tools/build.sh spike       # build AND run the Phase 1 capability probe
 tools/build.sh release     # signed .iq bundle for the store
 ```
+
+`sim` starts the simulator if it is not already running, loads the freshly
+built field into it, and brings the window to the front.
 
 All default to `fr165`; pass a device as the second argument to override. The script pins `JAVA_HOME`, reads whichever SDK is currently marked active, and refuses to build with a clear message if the device profile is not installed.
 

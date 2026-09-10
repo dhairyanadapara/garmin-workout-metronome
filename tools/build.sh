@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Build / test / package the data field.
 #
+#   tools/build.sh sim           build AND run the app in the simulator
 #   tools/build.sh device        build the app for the watch      (default)
 #   tools/build.sh test          build AND run the unit tests
-#   tools/build.sh spike         build the Phase 1 capability spike
+#   tools/build.sh spike         build AND run the Phase 1 spike in the simulator
 #   tools/build.sh release       build the signed .iq for the store
 #
 # Second argument overrides the target device, e.g. tools/build.sh device fr165m
@@ -45,7 +46,46 @@ fi
 
 mkdir -p bin
 
+# Start the simulator if it is not already up, then load a .prg into it and
+# bring its window to the front so it is ready to look at (or record).
+run_in_simulator() {
+    local prg="$1"
+    if ! tasklist 2>/dev/null | grep -qi simulator; then
+        ( connectiq >/dev/null 2>&1 & )
+        for _ in $(seq 1 30); do
+            tasklist 2>/dev/null | grep -qi simulator && break
+            powershell -NoProfile -Command "Start-Sleep -Milliseconds 400" >/dev/null 2>&1
+        done
+        powershell -NoProfile -Command "Start-Sleep -Seconds 3" >/dev/null 2>&1
+    fi
+
+    ( monkeydo "$prg" "$DEVICE" >/dev/null 2>&1 & )
+    powershell -NoProfile -Command "Start-Sleep -Seconds 5" >/dev/null 2>&1
+
+    powershell -NoProfile -Command '
+Add-Type @"
+using System; using System.Runtime.InteropServices;
+public class S {
+  [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int c);
+}
+"@
+$p = Get-Process simulator -ErrorAction SilentlyContinue |
+     Where-Object { $_.MainWindowTitle -like "*CIQ Simulator*" } | Select-Object -First 1
+if ($p) {
+  [void][S]::ShowWindow($p.MainWindowHandle, 9)
+  [void][S]::SetForegroundWindow($p.MainWindowHandle)
+  Write-Output ("Simulator ready: " + $p.MainWindowTitle)
+} else { Write-Output "Simulator window not found" }' 2>/dev/null | tail -1
+}
+
 case "$CMD" in
+  sim)
+    monkeyc -f monkey.jungle -o bin/WorkoutMetronome.prg -y "$KEY" -d "$DEVICE" -w
+    run_in_simulator bin/WorkoutMetronome.prg
+    echo "The field is beating at the configured target cadence."
+    echo "Record with OBS, or watch the display."
+    ;;
   device)
     monkeyc -f monkey.jungle -o bin/WorkoutMetronome.prg -y "$KEY" -d "$DEVICE" -w
     echo "Built bin/WorkoutMetronome.prg for $DEVICE"
@@ -66,6 +106,7 @@ case "$CMD" in
     mkdir -p spike/bin
     ( cd spike && monkeyc -f monkey.jungle -o bin/spike.prg -y "$KEY" -d "$DEVICE" -w )
     echo "Built spike/bin/spike.prg for $DEVICE -- see docs/SPIKE.md"
+    run_in_simulator spike/bin/spike.prg
     ;;
   release)
     # -e exports the multi-device .iq bundle for the store; -r is release mode.
@@ -73,7 +114,7 @@ case "$CMD" in
     echo "Built bin/WorkoutMetronome.iq -- upload this to apps.garmin.com"
     ;;
   *)
-    echo "Unknown command '$CMD'. Use: device | test | spike | release" >&2
+    echo "Unknown command '$CMD'. Use: sim | device | test | spike | release" >&2
     exit 1
     ;;
 esac

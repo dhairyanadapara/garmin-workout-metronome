@@ -65,9 +65,10 @@ A runtime capability probe on `fr165` confirms `Attention has :ToneProfile` is *
 ## Quick start
 
 ```bash
-tools/build.sh device      # app        -> bin/WorkoutMetronome.prg
-tools/build.sh test        # unit tests -> runs in the simulator
-tools/build.sh spike       # Phase 1 hardware probe
+tools/build.sh sim         # build AND run in the simulator  <- start here
+tools/build.sh test        # build AND run the unit tests
+tools/build.sh device      # app -> bin/WorkoutMetronome.prg, for sideloading
+tools/build.sh spike       # build AND run the Phase 1 hardware probe
 tools/build.sh release     # signed .iq for the store
 ```
 
