@@ -54,13 +54,18 @@ This key is **already generated** - the block above is only for recreating it. P
 
 ## 5. Build
 
-```bash
-tools/build.sh sim         # build AND run in the simulator
-tools/build.sh test        # build + run the unit tests in the simulator
-tools/build.sh device      # app -> bin/WorkoutMetronome.prg, for sideloading
-tools/build.sh spike       # build AND run the Phase 1 capability probe
-tools/build.sh release     # signed .iq bundle for the store
+From cmd.exe / Cmder / PowerShell, use the `.cmd` wrapper:
+
 ```
+toolsuild.cmd sim         # build AND run in the simulator
+toolsuild.cmd test        # build + run the unit tests in the simulator
+toolsuild.cmd device      # app -> bin/WorkoutMetronome.prg, for sideloading
+toolsuild.cmd spike       # build AND run the Phase 1 capability probe
+toolsuild.cmd release     # signed .iq bundle for the store
+```
+
+From Git Bash, call `tools/build.sh` with the same arguments. Running
+`build.sh` from cmd.exe only prompts Windows for an app to open it with.
 
 `sim` starts the simulator if it is not already running, loads the freshly
 built field into it, and brings the window to the front.

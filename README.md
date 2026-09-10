@@ -64,12 +64,24 @@ A runtime capability probe on `fr165` confirms `Attention has :ToneProfile` is *
 
 ## Quick start
 
-```bash
-tools/build.sh sim         # build AND run in the simulator  <- start here
-tools/build.sh test        # build AND run the unit tests
-tools/build.sh device      # app -> bin/WorkoutMetronome.prg, for sideloading
-tools/build.sh spike       # build AND run the Phase 1 hardware probe
-tools/build.sh release     # signed .iq for the store
+From **cmd.exe / Cmder / PowerShell**, run the `.cmd` wrapper from the project root:
+
 ```
+toolsuild.cmd sim         # build AND run in the simulator  <- start here
+toolsuild.cmd test        # build AND run the unit tests
+toolsuild.cmd device      # app -> bin/WorkoutMetronome.prg, for sideloading
+toolsuild.cmd spike       # build AND run the Phase 1 hardware probe
+toolsuild.cmd release     # signed .iq for the store
+```
+
+From **Git Bash**, call the script itself instead:
+
+```bash
+tools/build.sh sim
+```
+
+Running `build.sh` directly from cmd.exe just makes Windows ask which app should
+*open* the file -- `.sh` is not an executable type there. That is what the
+wrapper exists to avoid.
 
 Everything defaults to `fr165`. See [docs/SETUP.md](docs/SETUP.md) for the one remaining setup step.
