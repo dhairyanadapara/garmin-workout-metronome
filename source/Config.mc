@@ -16,6 +16,9 @@ enum CueMode {
 //! data field mid-run.
 class Config {
 
+    //! The EFFECTIVE target. load() resets it from settings; the lap button
+    //! nudges it during a run (see MetronomeView.onTimerLap), which is the only
+    //! on-watch input a data field has.
     public var targetSpm as Number = 170;
     public var stepsPerBeat as Number = 1;
     public var cueMode as Number = CUE_BOTH;
@@ -24,6 +27,12 @@ class Config {
     public var deviationPercent as Number = 5;
     public var deviationCooldownSec as Number = 10;
     public var deviationConfirmTicks as Number = 3;
+
+    // Lap-button cadence adjustment.
+    public var lapAdjustEnabled as Boolean = true;
+    public var lapStepSpm as Number = 5;
+    public var lapMinSpm as Number = 150;
+    public var lapMaxSpm as Number = 190;
 
     public function initialize() {
         load();
@@ -39,6 +48,33 @@ class Config {
         deviationPercent     = numberOr("deviationPercent", 5, 1, 30);
         deviationCooldownSec = numberOr("deviationCooldownSec", 10, 3, 60);
         deviationConfirmTicks= numberOr("deviationConfirmTicks", 3, 1, 10);
+        lapAdjustEnabled     = booleanOr("lapAdjustEnabled", true);
+        lapStepSpm           = numberOr("lapStepSpm", 5, 1, 20);
+        lapMinSpm            = numberOr("lapMinSpm", 150, 100, 220);
+        lapMaxSpm            = numberOr("lapMaxSpm", 190, 100, 220);
+
+        if (lapMaxSpm < lapMinSpm) {
+            // A user can enter these in either order; do not let that produce
+            // a range the lap button can never escape.
+            var swap = lapMinSpm;
+            lapMinSpm = lapMaxSpm;
+            lapMaxSpm = swap;
+        }
+    }
+
+    //! Step the effective target one notch, wrapping back to the bottom of the
+    //! range at the top. One button means one direction.
+    //! @return the new target
+    public function stepTarget() as Number {
+        var next = targetSpm + lapStepSpm;
+        if (next > lapMaxSpm) {
+            next = lapMinSpm;
+        }
+        if (next < lapMinSpm) {
+            next = lapMinSpm;
+        }
+        targetSpm = next;
+        return targetSpm;
     }
 
     public function wantsTone() as Boolean {

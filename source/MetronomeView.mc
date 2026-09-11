@@ -52,6 +52,8 @@ class MetronomeView extends WatchUi.DataField {
     //! settings mid activity. Re-reading here means the runner can change
     //! target cadence from their phone without restarting the run.
     public function reloadSettings() as Void {
+        // Note this also discards any lap-button adjustment, which is right:
+        // an explicit edit from the phone should win over an in-run nudge.
         _config.load();
         _grid.setTempo(_config.targetSpm, _config.stepsPerBeat);
         _cadence.clear();
@@ -63,7 +65,7 @@ class MetronomeView extends WatchUi.DataField {
         var now = System.getTimer();
         var timerState = timerStateOf(info);
 
-        syncToTimerState(timerState, now);
+        stopIfTimerNotRunning(timerState);
 
         _liveCadence = (info has :currentCadence) ? info.currentCadence : null;
 
@@ -108,34 +110,73 @@ class MetronomeView extends WatchUi.DataField {
         return offsets;
     }
 
-    //! Keep the beat matched to the timer state.
-    //!
-    //! Deliberately LEVEL based, not edge based. An earlier version acted only
-    //! on transitions, which meant that if a transition was ever missed -- the
-    //! field created after the timer was already running, a state the watch
-    //! reports only briefly, a wake-up skipped -- the beat and the activity
-    //! stayed out of step until the next transition. Comparing the level every
-    //! tick cannot drift out of step, and costs nothing.
-    //!
-    //! The belt-and-braces stop() below matters because arming outlives this
-    //! app: the firmware keeps looping whether or not we are still here, so if
-    //! the timer is not running the metronome must be actively silenced, not
-    //! merely left alone.
-    private function syncToTimerState(timerState as Number, nowMs as Number) as Void {
-        var running = (timerState == Activity.TIMER_STATE_ON);
+    // ------------------------------------------------------------------
+    // Timer events. These are the AUTHORITATIVE start and stop signals.
+    //
+    // Polling Activity.Info.timerState is not: on a real FR165 the field began
+    // beating the moment the Run screen was opened, before START was ever
+    // pressed. Whatever the watch reports there, these callbacks fire only on
+    // the real transitions, so the beat can only ever begin when the runner
+    // actually sets off.
+    // ------------------------------------------------------------------
 
-        if (running && !_beating) {
-            _cadence.clear();
-            _beating = true;
-            // Put a beat exactly on the moment the runner set off.
-            _metronome.start(nowMs, _config);
-        } else if (!running && _beating) {
-            _beating = false;
-            _metronome.stop(_config);
-        } else if (!running && _metronome.isArmed()) {
-            // Not beating, but the firmware is still looping -- a stale arming
-            // from before, or a stop that did not take. Silence it.
-            _metronome.stop(_config);
+    public function onTimerStart() as Void { beginBeating(); }
+    public function onTimerResume() as Void { beginBeating(); }
+
+    public function onTimerStop() as Void { endBeating(); }
+    public function onTimerPause() as Void { endBeating(); }
+    public function onTimerReset() as Void { endBeating(); }
+
+    //! The lap button is the ONLY input a Connect IQ data field can receive --
+    //! there is no way to give one a menu or a key handler. So it is what
+    //! adjusts the target cadence mid-run, stepping up and wrapping back to the
+    //! bottom of the range at the top, because one button means one direction.
+    //!
+    //! Off by default would make it undiscoverable; on by default risks
+    //! surprising someone who presses lap for laps. It is a setting, defaulting
+    //! to on, and the new target is shown on the field immediately.
+    public function onTimerLap() as Void {
+        if (!_config.lapAdjustEnabled) {
+            return;
+        }
+
+        _config.stepTarget();
+        _grid.setTempo(_config.targetSpm, _config.stepsPerBeat);
+        _cadence.clear();
+        // Metronome sees the interval change on its next tick and re-arms at a
+        // moment that will not clip a beat.
+    }
+
+    private function beginBeating() as Void {
+        if (_beating) { return; }
+        _cadence.clear();
+        _beating = true;
+        _metronome.start(System.getTimer(), _config);
+    }
+
+    private function endBeating() as Void {
+        _beating = false;
+        _metronome.stop(_config);
+    }
+
+    //! A SAFETY NET, not the start signal.
+    //!
+    //! This may only ever STOP the beat, never start it. The timer callbacks
+    //! above are what start it. That asymmetry is deliberate: the observed
+    //! fault was the field beating before the activity had begun, so anything
+    //! that could start the beat from polled state is a liability, while
+    //! anything that can silence a beat that should not be sounding is pure
+    //! benefit.
+    //!
+    //! It matters because an arming outlives this app -- the firmware keeps
+    //! looping whether or not we are still here -- so a stale arming has to be
+    //! actively silenced rather than left to expire.
+    private function stopIfTimerNotRunning(timerState as Number) as Void {
+        if (timerState == Activity.TIMER_STATE_ON) {
+            return;
+        }
+        if (_beating || _metronome.isArmed()) {
+            endBeating();
         }
     }
 
@@ -228,8 +269,16 @@ class MetronomeView extends WatchUi.DataField {
         return WatchUi.loadResource(Rez.Strings.LabelName) as String;
     }
 
+    //! Bottom line: the TARGET, plus how far off it you currently are.
+    //!
+    //! Labelled, because the big number above is live cadence and two bare
+    //! numbers on one small screen are easy to confuse at a glance mid-run.
+    //! The target can change during a run via the lap button, so it has to be
+    //! visible rather than something you set once and forget.
     private function footer() as String {
-        var target = _config.targetSpm.format("%d");
+        var target = WatchUi.loadResource(Rez.Strings.LabelTarget) as String;
+        target += " " + _config.targetSpm.format("%d");
+
         if (_deviation == null) {
             return target;
         }

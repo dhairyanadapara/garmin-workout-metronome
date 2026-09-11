@@ -62,8 +62,35 @@ Data field settings **cannot be edited on the watch** — Garmin does not allow 
 | Alert band | 5% | |
 | Alert delay | 3 s | seconds off target before it fires |
 | Alert cooldown | 10 s | minimum gap between alerts |
+| Lap button changes cadence | On | see below |
+| Lap step | 5 spm | how much each LAP press adds |
+| Lowest / highest cadence | 150 / 190 | the range the lap button wraps within |
 
 For a sideloaded app the settings only appear in Connect Mobile once the watch has synced, which can take a few minutes after install.
+
+## Changing cadence during a run
+
+Press **LAP**. Each press steps the target up by 5 spm and wraps back to the
+bottom of the range at the top, and the new target appears on the field
+immediately as `TGT 175`.
+
+The lap button is the *only* input a Connect IQ data field can receive -- there
+is no way to give one a menu or a key handler -- so it is this or the phone.
+The press still records a lap as normal. Turn it off in settings if you use lap
+splits and would rather not have the two share a button.
+
+An edit pushed from Connect Mobile overrides whatever the lap button set.
+
+## What the field shows
+
+```
+CADENCE          <- state: CADENCE / PAUSED / MUTED / VIBE ONLY
+   172           <- your live cadence, green in range, red out of range
+TGT 170  +1%     <- the target, and how far off it you are
+```
+
+In a small field (a quarter of a four-field page) it drops to just the live
+cadence number, coloured by zone.
 
 ## Uninstalling
 

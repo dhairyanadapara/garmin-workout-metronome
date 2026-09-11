@@ -50,4 +50,24 @@
              prompt="@Strings.SettingDeviationCooldownPrompt">
         <settingConfig type="numeric" min="3" max="60"/>
     </setting>
+
+    <setting propertyKey="@Properties.lapAdjustEnabled" title="@Strings.SettingLapAdjust"
+             prompt="@Strings.SettingLapAdjustPrompt">
+        <settingConfig type="boolean"/>
+    </setting>
+
+    <setting propertyKey="@Properties.lapStepSpm" title="@Strings.SettingLapStep"
+             prompt="@Strings.SettingLapStepPrompt">
+        <settingConfig type="numeric" min="1" max="20"/>
+    </setting>
+
+    <setting propertyKey="@Properties.lapMinSpm" title="@Strings.SettingLapMin"
+             prompt="@Strings.SettingLapMinPrompt">
+        <settingConfig type="numeric" min="100" max="220"/>
+    </setting>
+
+    <setting propertyKey="@Properties.lapMaxSpm" title="@Strings.SettingLapMax"
+             prompt="@Strings.SettingLapMaxPrompt">
+        <settingConfig type="numeric" min="100" max="220"/>
+    </setting>
 </settings>

@@ -13,4 +13,9 @@
     <property id="deviationCooldownSec" type="number">10</property>
     <property id="deviationConfirmTicks" type="number">3</property>
 
+    <property id="lapAdjustEnabled" type="boolean">true</property>
+    <property id="lapStepSpm" type="number">5</property>
+    <property id="lapMinSpm" type="number">150</property>
+    <property id="lapMaxSpm" type="number">190</property>
+
 </properties>
