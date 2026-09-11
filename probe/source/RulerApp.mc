@@ -23,16 +23,27 @@ import Toybox.WatchUi;
 //! One profile containing four beats separated by four DIFFERENT rests, chosen
 //! so that each candidate quantum predicts a different set of gaps:
 //!
-//!   rest    no rounding   quantum 8   quantum 10   quantum 16
-//!   300         340          344         340          352
-//!   305         345          352         350          352
-//!   310         350          352         350          352
-//!   315         355          360         360          368
+//! A first attempt used rests 300/305/310/315, which was too fine: every one
+//! of them rounded to the same value, so all four gaps came out identical at
+//! 360ms and the measurement could not tell a large quantum from no pattern at
+//! all. These four are deliberately spread far apart AND chosen so that no two
+//! candidate quanta predict the same signature:
 //!
-//! Record ~30s, detect onsets, and take the median of every 4th gap. The
-//! pattern of the four gaps identifies the quantum outright. Comparing the sum
-//! of the four gaps against the profile's nominal 1420ms also reveals any
-//! per-repetition overhead that is NOT explained by rounding.
+//!   rest   none    Q=5     Q=8     Q=10    Q=16    Q=20    Q=40
+//!   205    245     245     248     250     248     260     280
+//!   310    350     350     352     350     360     360     360
+//!   415    455     455     456     460     456     460     480
+//!   520    560     560     560     560     568     560     560
+//!
+//! Every column is distinct, and the four gaps are far enough apart (roughly
+//! 245 / 350 / 455 / 560) that they cluster cleanly even if an onset is missed
+//! and the mod-4 alignment is lost.
+//!
+//! Comparing the sum of the four gaps against the nominal 1610ms also reveals
+//! any per-repetition overhead that rounding does not explain.
+//!
+//! RUN THIS ON THE WATCH, not just the simulator. Every timing figure so far
+//! comes from the simulator's audio path, which need not match the firmware.
 class RulerApp extends Application.AppBase {
     private var _view as RulerField?;
     public function initialize() { AppBase.initialize(); }
@@ -49,10 +60,10 @@ class RulerField extends WatchUi.DataField {
     const BEAT_MS = 40;
     const BEAT_HZ = 2000;
 
-    const REST_A = 300;
-    const REST_B = 305;
-    const REST_C = 310;
-    const REST_D = 315;
+    const REST_A = 205;
+    const REST_B = 310;
+    const REST_C = 415;
+    const REST_D = 520;
 
     private var _armed as Boolean = false;
     private var _status as String = "arming";
@@ -110,7 +121,7 @@ class RulerField extends WatchUi.DataField {
         y += lh;
         dc.drawText(cx, y, f, _status, Graphics.TEXT_JUSTIFY_CENTER);
         y += lh;
-        dc.drawText(cx, y, f, "rests 300/305/310/315", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, y, f, "rests 205/310/415/520", Graphics.TEXT_JUSTIFY_CENTER);
         y += lh;
         dc.drawText(cx, y, f, "tick " + _ticks.format("%d"), Graphics.TEXT_JUSTIFY_CENTER);
     }

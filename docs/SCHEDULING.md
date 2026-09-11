@@ -73,6 +73,39 @@ The firmware profile works in whole milliseconds, so the grid does too - modelli
 
 170 spm wants 352.94 ms and gets 353 ms, so the real tempo is 169.97 spm: a 0.017% error, about one beat per hour. What a runner feels is the *spacing* between consecutive beats, and that is exact.
 
+
+## OPEN: a 2% tempo offset, not yet calibrated on hardware
+
+Recordings of the **simulator** consistently measure the armed metronome's
+period as **360 ms** where the profile is `40 + 313 = 353 ms`. That is
+166.67 spm against a requested 170 - a systematic 2% offset. The spacing is
+steady and no beats are dropped; the tempo is simply slow.
+
+The likeliest cause is the firmware rounding each element duration **up** to a
+quantum: `313 -> 320` would give exactly the 360 ms observed.
+
+A first ruler probe used rests of 300/305/310/315 and was too fine to tell -
+all four rounded to the same value and produced four identical 360 ms gaps,
+which is equally consistent with a large quantum or with no pattern at all.
+The probe now uses **205 / 310 / 415 / 520**, chosen so that every candidate
+quantum predicts a distinct signature:
+
+| rest | none | Q=5 | Q=8 | Q=10 | Q=16 | Q=20 | Q=40 |
+|---|---|---|---|---|---|---|---|
+| 205 | 245 | 245 | 248 | 250 | 248 | 260 | 280 |
+| 310 | 350 | 350 | 352 | 350 | 360 | 360 | 360 |
+| 415 | 455 | 455 | 456 | 460 | 456 | 460 | 480 |
+| 520 | 560 | 560 | 560 | 560 | 568 | 560 | 560 |
+
+**This must be measured on the watch, not the simulator.** Every timing figure
+in this document so far comes from the simulator's audio path, which need not
+match the firmware's. Once the quantum is known, the fix is to choose beat and
+rest durations that are already multiples of it, so the firmware has nothing to
+round - not to subtract a fudge factor.
+
+Until then the app's tempo is accurate to about 2% in the simulator, and
+unmeasured on hardware.
+
 ## Verification
 
 `tools/build.sh test` - 10 tests covering the grid and the arming policy:

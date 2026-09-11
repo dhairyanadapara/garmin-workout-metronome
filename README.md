@@ -40,6 +40,7 @@ resources/
   settings/                the Garmin Connect Mobile settings screen + defaults
 spike/                     throwaway Phase 1 hardware capability probe
 docs/
+  INSTALL.md               getting it onto the watch, and where the settings live
   SCHEDULING.md            how the beat is scheduled, and why -- read before touching it
   SETUP.md                 toolchain install, developer key, build & sideload
   SPIKE.md                 the Phase 1 protocol and how to read the result
