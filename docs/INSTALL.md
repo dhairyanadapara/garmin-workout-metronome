@@ -62,31 +62,52 @@ Data field settings **cannot be edited on the watch** — Garmin does not allow 
 | Alert band | 5% | |
 | Alert delay | 3 s | seconds off target before it fires |
 | Alert cooldown | 10 s | minimum gap between alerts |
-| Lap button changes cadence | On | see below |
+| Lap button | Change cadence, then silence | see below |
 | Lap step | 5 spm | how much each LAP press adds |
-| Lowest / highest cadence | 150 / 190 | the range the lap button wraps within |
+| Lowest / highest cadence | 160 / 180 | the range the lap button cycles through |
 
 For a sideloaded app the settings only appear in Connect Mobile once the watch has synced, which can take a few minutes after install.
 
-## Changing cadence during a run
+## Controlling it during a run: the LAP button
 
-Press **LAP**. Each press steps the target up by 5 spm and wraps back to the
-bottom of the range at the top, and the new target appears on the field
-immediately as `TGT 175`.
+A Connect IQ data field **cannot be given a menu or a key handler** -- `onTimerLap`
+is the only input one can receive. So everything on-watch shares the lap button,
+and the press still records a lap as normal.
 
-The lap button is the *only* input a Connect IQ data field can receive -- there
-is no way to give one a menu or a key handler -- so it is this or the phone.
-The press still records a lap as normal. Turn it off in settings if you use lap
-splits and would rather not have the two share a button.
+By default LAP walks a single cycle, and the field shows where you are on every
+press:
 
-An edit pushed from Connect Mobile overrides whatever the lap button set.
+```
+TGT 170  ->  TGT 175  ->  TGT 180  ->  TGT OFF  ->  TGT 160  ->  TGT 165  -> ...
+```
+
+So one or two presses reaches **silence** from anywhere, and another press
+brings the beat back at the bottom of the range. While silenced the header reads
+`SILENCED`, cadence is still displayed and still coloured, and **nothing makes a
+sound -- including the off-target alert**, which is the last thing you want to
+hear just after asking for quiet.
+
+Silence survives a pause and resume. Someone who silenced the beat did not mean
+"until the next traffic light".
+
+If you would rather have one job on the button, **Lap button** in settings offers:
+
+| Setting | LAP does |
+|---|---|
+| Nothing | only records a lap |
+| Silence / resume | one press quiet, next press back on |
+| Change cadence | steps the target, never silences |
+| Change cadence, then silence | the default cycle above |
+
+The range (default 160-180) and step (default 5) are configurable, and an edit
+pushed from Connect Mobile overrides whatever the lap button set.
 
 ## What the field shows
 
 ```
-CADENCE          <- state: CADENCE / PAUSED / MUTED / VIBE ONLY
+CADENCE          <- state: CADENCE / PAUSED / SILENCED / MUTED / VIBE ONLY
    172           <- your live cadence, green in range, red out of range
-TGT 170  +1%     <- the target, and how far off it you are
+TGT 170  +1%     <- the target (or OFF), and how far off it you are
 ```
 
 In a small field (a quarter of a four-field page) it drops to just the live

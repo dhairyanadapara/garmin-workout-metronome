@@ -28,6 +28,12 @@ class MetronomeView extends WatchUi.DataField {
     private var _metronome as Metronome;
     private var _cadence as CadenceMonitor;
 
+    // Silenced by the runner mid-activity. Distinct from _beating: the timer
+    // is still running, cadence is still watched and displayed, we are simply
+    // not making any noise. Survives a pause and resume -- someone who muted
+    // the beat did not mean "until the next traffic light".
+    private var _muted as Boolean = false;
+
     // True while the activity timer is running and the beat should sound.
     // Compared against the timer state every tick rather than tracked through
     // transitions -- see syncToTimerState().
@@ -78,6 +84,16 @@ class MetronomeView extends WatchUi.DataField {
         var shouldAlert = _cadence.update(_liveCadence, _config);
         _zone = _cadence.zone();
         _deviation = _cadence.deviationPercent(_config);
+
+        if (_muted) {
+            // Keep watching and displaying cadence, but make no noise at all --
+            // including the off-target alert, which is the last thing someone
+            // who just silenced the metronome wants to hear.
+            if (_metronome.isArmed()) {
+                _metronome.stop(_config);
+            }
+            return;
+        }
 
         if (shouldAlert) {
             // There is only one buzzer, so the alert has to interrupt the
@@ -136,22 +152,60 @@ class MetronomeView extends WatchUi.DataField {
     //! surprising someone who presses lap for laps. It is a setting, defaulting
     //! to on, and the new target is shown on the field immediately.
     public function onTimerLap() as Void {
-        if (!_config.lapAdjustEnabled) {
+        var action = _config.lapAction;
+
+        if (action == LAP_NOTHING) {
             return;
         }
 
-        _config.stepTarget();
+        if (action == LAP_MUTE) {
+            setMuted(!_muted);
+            return;
+        }
+
+        // Coming out of a silent position resumes at the current target rather
+        // than stepping past it, so the press that unmutes does exactly one
+        // thing.
+        if (_muted) {
+            setMuted(false);
+            return;
+        }
+
+        var wrapped = _config.stepTarget();
+
+        if (wrapped && action == LAP_CADENCE_MUTE) {
+            // The silent position sits at the top of the cycle, so the sequence
+            // reads 160 -> 165 -> ... -> 180 -> off -> 160, and muting is
+            // always reachable without leaving the field.
+            setMuted(true);
+            return;
+        }
+
         _grid.setTempo(_config.targetSpm, _config.stepsPerBeat);
         _cadence.clear();
         // Metronome sees the interval change on its next tick and re-arms at a
         // moment that will not clip a beat.
     }
 
+    private function setMuted(muted as Boolean) as Void {
+        _muted = muted;
+        if (_muted) {
+            // Silence immediately rather than waiting for the arming to lapse:
+            // the runner pressed the button because they want quiet NOW.
+            _metronome.stop(_config);
+        } else if (_beating) {
+            _grid.setTempo(_config.targetSpm, _config.stepsPerBeat);
+            _metronome.start(System.getTimer(), _config);
+        }
+    }
+
     private function beginBeating() as Void {
         if (_beating) { return; }
         _cadence.clear();
         _beating = true;
-        _metronome.start(System.getTimer(), _config);
+        if (!_muted) {
+            _metronome.start(System.getTimer(), _config);
+        }
     }
 
     private function endBeating() as Void {
@@ -260,6 +314,9 @@ class MetronomeView extends WatchUi.DataField {
         if (!_beating) {
             return WatchUi.loadResource(Rez.Strings.LabelPaused) as String;
         }
+        if (_muted) {
+            return WatchUi.loadResource(Rez.Strings.LabelSilenced) as String;
+        }
         if (_config.wantsTone() && !_cue.tonesAudible() && !_config.wantsVibe()) {
             return WatchUi.loadResource(Rez.Strings.LabelMuted) as String;
         }
@@ -277,7 +334,11 @@ class MetronomeView extends WatchUi.DataField {
     //! visible rather than something you set once and forget.
     private function footer() as String {
         var target = WatchUi.loadResource(Rez.Strings.LabelTarget) as String;
-        target += " " + _config.targetSpm.format("%d");
+        if (_muted) {
+            target += " " + (WatchUi.loadResource(Rez.Strings.LabelOff) as String);
+        } else {
+            target += " " + _config.targetSpm.format("%d");
+        }
 
         if (_deviation == null) {
             return target;

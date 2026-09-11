@@ -51,9 +51,14 @@
         <settingConfig type="numeric" min="3" max="60"/>
     </setting>
 
-    <setting propertyKey="@Properties.lapAdjustEnabled" title="@Strings.SettingLapAdjust"
-             prompt="@Strings.SettingLapAdjustPrompt">
-        <settingConfig type="boolean"/>
+    <setting propertyKey="@Properties.lapAction" title="@Strings.SettingLapAction"
+             prompt="@Strings.SettingLapActionPrompt">
+        <settingConfig type="list">
+            <listEntry value="0">@Strings.LapNothing</listEntry>
+            <listEntry value="1">@Strings.LapMute</listEntry>
+            <listEntry value="2">@Strings.LapCadence</listEntry>
+            <listEntry value="3">@Strings.LapCadenceMute</listEntry>
+        </settingConfig>
     </setting>
 
     <setting propertyKey="@Properties.lapStepSpm" title="@Strings.SettingLapStep"

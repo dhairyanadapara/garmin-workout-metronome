@@ -9,6 +9,8 @@
     <string id="LabelMuted">MUTED</string>
     <string id="LabelDegraded">VIBE ONLY</string>
     <string id="LabelTarget">TGT</string>
+    <string id="LabelSilenced">SILENCED</string>
+    <string id="LabelOff">OFF</string>
 
     <!-- Settings screen (Garmin Connect Mobile) -->
     <string id="SettingTargetSpm">Target cadence (steps/min)</string>
@@ -38,8 +40,12 @@
     <string id="SettingDeviationConfirmTicks">Alert delay (seconds)</string>
     <string id="SettingDeviationConfirmTicksPrompt">Seconds off target before alerting. Higher is less naggy.</string>
 
-    <string id="SettingLapAdjust">Lap button changes cadence</string>
-    <string id="SettingLapAdjustPrompt">Press LAP during a run to step the target cadence. It still records a lap.</string>
+    <string id="SettingLapAction">Lap button</string>
+    <string id="SettingLapActionPrompt">The lap button is the only control a data field can have. It still records a lap either way.</string>
+    <string id="LapNothing">Nothing</string>
+    <string id="LapMute">Silence / resume</string>
+    <string id="LapCadence">Change cadence</string>
+    <string id="LapCadenceMute">Change cadence, then silence</string>
 
     <string id="SettingLapStep">Lap step (steps/min)</string>
     <string id="SettingLapStepPrompt">How much each LAP press adds to the target.</string>

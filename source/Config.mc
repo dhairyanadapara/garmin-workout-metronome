@@ -9,6 +9,15 @@ enum CueMode {
     CUE_BOTH = 2
 }
 
+// What the lap button does during a run. The lap button is the only input a
+// data field can receive, so everything on-watch has to share it.
+enum LapAction {
+    LAP_NOTHING = 0,
+    LAP_MUTE = 1,          // one press silences, the next resumes
+    LAP_CADENCE = 2,       // step the target, never silences
+    LAP_CADENCE_MUTE = 3   // step the target, with a silent position in the cycle
+}
+
 //! Typed, crash-proof access to the app settings the user edits in Garmin
 //! Connect Mobile. Every read is defended: a property can be missing on a
 //! fresh install, or the wrong type if a settings.xml key was renamed between
@@ -28,11 +37,11 @@ class Config {
     public var deviationCooldownSec as Number = 10;
     public var deviationConfirmTicks as Number = 3;
 
-    // Lap-button cadence adjustment.
-    public var lapAdjustEnabled as Boolean = true;
+    // Lap button behaviour.
+    public var lapAction as Number = LAP_CADENCE_MUTE;
     public var lapStepSpm as Number = 5;
-    public var lapMinSpm as Number = 150;
-    public var lapMaxSpm as Number = 190;
+    public var lapMinSpm as Number = 160;
+    public var lapMaxSpm as Number = 180;
 
     public function initialize() {
         load();
@@ -48,10 +57,10 @@ class Config {
         deviationPercent     = numberOr("deviationPercent", 5, 1, 30);
         deviationCooldownSec = numberOr("deviationCooldownSec", 10, 3, 60);
         deviationConfirmTicks= numberOr("deviationConfirmTicks", 3, 1, 10);
-        lapAdjustEnabled     = booleanOr("lapAdjustEnabled", true);
+        lapAction            = numberOr("lapAction", LAP_CADENCE_MUTE, 0, 3);
         lapStepSpm           = numberOr("lapStepSpm", 5, 1, 20);
-        lapMinSpm            = numberOr("lapMinSpm", 150, 100, 220);
-        lapMaxSpm            = numberOr("lapMaxSpm", 190, 100, 220);
+        lapMinSpm            = numberOr("lapMinSpm", 160, 100, 220);
+        lapMaxSpm            = numberOr("lapMaxSpm", 180, 100, 220);
 
         if (lapMaxSpm < lapMinSpm) {
             // A user can enter these in either order; do not let that produce
@@ -62,19 +71,21 @@ class Config {
         }
     }
 
-    //! Step the effective target one notch, wrapping back to the bottom of the
-    //! range at the top. One button means one direction.
-    //! @return the new target
-    public function stepTarget() as Number {
+    //! Step the effective target one notch.
+    //!
+    //! @return true if the top of the range was passed, which is the point at
+    //!         which the caller inserts the silent position in the cycle
+    public function stepTarget() as Boolean {
         var next = targetSpm + lapStepSpm;
         if (next > lapMaxSpm) {
-            next = lapMinSpm;
+            targetSpm = lapMinSpm;
+            return true;
         }
         if (next < lapMinSpm) {
             next = lapMinSpm;
         }
         targetSpm = next;
-        return targetSpm;
+        return false;
     }
 
     public function wantsTone() as Boolean {

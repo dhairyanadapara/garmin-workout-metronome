@@ -23,6 +23,7 @@ Getting here took two wrong designs, both caught by onset analysis of screen rec
 - **Off-target alert:** a distinct two-tone cue when your smoothed cadence drifts outside ±5% of target, rising for *speed up*, falling for *slow down*
 - Smoothing + hysteresis so it doesn't nag: 5 s rolling average, N consecutive out-of-range seconds to fire, then a cooldown
 - Silent while paused, and through the first 15 s of a run
+- **LAP button control during a run** — step the target cadence, or silence the beat entirely and bring it back. A data field has no other possible input.
 
 ## Layout
 
