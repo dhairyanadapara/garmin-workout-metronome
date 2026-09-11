@@ -28,8 +28,9 @@ class MetronomeView extends WatchUi.DataField {
     private var _metronome as Metronome;
     private var _cadence as CadenceMonitor;
 
-    // Last known timer state, so we can detect the start/pause/resume edges.
-    private var _lastTimerState as Number = Activity.TIMER_STATE_OFF;
+    // True while the activity timer is running and the beat should sound.
+    // Compared against the timer state every tick rather than tracked through
+    // transitions -- see syncToTimerState().
     private var _beating as Boolean = false;
 
     // Display state, written by compute() and read by onUpdate().
@@ -62,7 +63,7 @@ class MetronomeView extends WatchUi.DataField {
         var now = System.getTimer();
         var timerState = timerStateOf(info);
 
-        handleTimerEdges(timerState, now);
+        syncToTimerState(timerState, now);
 
         _liveCadence = (info has :currentCadence) ? info.currentCadence : null;
 
@@ -107,25 +108,49 @@ class MetronomeView extends WatchUi.DataField {
         return offsets;
     }
 
-    //! Start beating when the timer runs, stop on pause or stop.
-    private function handleTimerEdges(timerState as Number, nowMs as Number) as Void {
-        if (timerState == _lastTimerState) { return; }
+    //! Keep the beat matched to the timer state.
+    //!
+    //! Deliberately LEVEL based, not edge based. An earlier version acted only
+    //! on transitions, which meant that if a transition was ever missed -- the
+    //! field created after the timer was already running, a state the watch
+    //! reports only briefly, a wake-up skipped -- the beat and the activity
+    //! stayed out of step until the next transition. Comparing the level every
+    //! tick cannot drift out of step, and costs nothing.
+    //!
+    //! The belt-and-braces stop() below matters because arming outlives this
+    //! app: the firmware keeps looping whether or not we are still here, so if
+    //! the timer is not running the metronome must be actively silenced, not
+    //! merely left alone.
+    private function syncToTimerState(timerState as Number, nowMs as Number) as Void {
+        var running = (timerState == Activity.TIMER_STATE_ON);
 
-        var nowRunning = (timerState == Activity.TIMER_STATE_ON);
-
-        if (nowRunning) {
+        if (running && !_beating) {
             _cadence.clear();
             _beating = true;
             // Put a beat exactly on the moment the runner set off.
             _metronome.start(nowMs, _config);
-        } else {
+        } else if (!running && _beating) {
             _beating = false;
-            // Essential: the firmware would otherwise keep looping the beat
-            // straight through the pause, for the rest of the arming window.
+            _metronome.stop(_config);
+        } else if (!running && _metronome.isArmed()) {
+            // Not beating, but the firmware is still looping -- a stale arming
+            // from before, or a stop that did not take. Silence it.
             _metronome.stop(_config);
         }
+    }
 
-        _lastTimerState = timerState;
+    //! Called when the data field is torn down. Without this the firmware
+    //! carries on looping the beat for the rest of the arming window, with
+    //! nothing left running that could stop it.
+    public function onHide() as Void {
+        _beating = false;
+        _metronome.stop(_config);
+    }
+
+    //! Same, for app shutdown.
+    public function shutdown() as Void {
+        _beating = false;
+        _metronome.stop(_config);
     }
 
     private function timerStateOf(info as Activity.Info) as Number {

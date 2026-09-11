@@ -21,13 +21,23 @@ import Toybox.Lang;
 //! per re-arm -- and even that is made harmless by the two rules in tryArm().
 class Metronome {
 
-    //! How long one arming lasts. Long enough that re-arming is rare, short
-    //! enough that a stale metronome cannot outlive a crash by much.
-    const ARM_MS = 600000;          // 10 minutes
+    //! How long one arming lasts.
+    //!
+    //! This is a SAFETY limit, not a performance one. Once armed, the firmware
+    //! loops on its own and keeps beeping even if this app stops running --
+    //! so the arming length is the worst case for how long a watch can be left
+    //! beeping after an activity ends abruptly, the field is torn down, or the
+    //! app is killed. An earlier 10 minute arming made exactly that happen on
+    //! a real watch: the beat carried on across screens with no way to stop it.
+    //!
+    //! 20 seconds bounds the damage while still leaving ~15 wake-ups to find a
+    //! safe re-arming moment, so continuity does not suffer.
+    const ARM_MS = 20000;
 
-    //! Re-arm once the current arming has less than this left, so there are
-    //! many wake-ups to find a safe moment in.
-    const REARM_LEAD_MS = 60000;    // 1 minute
+    //! Re-arm once the current arming has less than this left. At 1 Hz that is
+    //! ~8 chances to catch a moment when no beat is sounding, and only ~11% of
+    //! moments are unsafe.
+    const REARM_LEAD_MS = 8000;
 
     private var _grid as BeatGrid;
     private var _cue as Cue;
