@@ -14,10 +14,19 @@ Produces `bin\WorkoutMetronome.prg`. Use `tools\build.cmd device fr165m` if your
 
 ### 2. Copy it to the watch
 
-1. Plug the FR165 in by USB. It mounts as a drive called **GARMIN**.
-2. Open `GARMIN\APPS\` on that drive.
-3. Copy `bin\WorkoutMetronome.prg` into it.
-4. **Eject the drive properly** (Safely Remove Hardware), then unplug. Pulling the cable without ejecting is the usual reason an app does not show up.
+The FR165 connects over **MTP**, not as a USB mass-storage drive — so it gets
+no drive letter and command-line tools cannot reach it. Use Explorer:
+
+1. Plug the watch in. It appears in Explorer's sidebar as **Forerunner 165**.
+2. Navigate to **Forerunner 165 → Internal Storage → GARMIN → Apps**.
+3. Drag the `.prg` into that folder — **directly into `Apps`**, alongside the
+   `DATA`, `LOGS`, `MAIL`, `SETTINGS` and `TEMP` folders, *not* inside any of
+   them. Those are Garmin's own.
+4. Unplug. There is no "safely remove" step for an MTP device, but do let the
+   copy finish first.
+
+Explorer hides the extension, so the file shows as **WorkoutMetronome** with
+type `PRG File`. That is correct.
 
 The watch does not need a restart.
 
@@ -58,7 +67,7 @@ For a sideloaded app the settings only appear in Connect Mobile once the watch h
 
 ## Uninstalling
 
-Delete the `.prg` from `GARMIN\APPS\`, or on the watch: **Settings → Connect IQ Apps → Data Fields → Workout Metronome → Remove**.
+Delete the `.prg` from `GARMIN\Apps\` in Explorer, or on the watch: **Settings → Connect IQ Apps → Data Fields → Workout Metronome → Remove**.
 
 ## The timing ruler (measurement probe)
 
