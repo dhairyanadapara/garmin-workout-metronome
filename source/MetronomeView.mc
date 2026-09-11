@@ -20,6 +20,9 @@ import Toybox.WatchUi;
 //! Deliberately no layout XML: a data field can be given anything from a full
 //! screen down to a quarter of a small round watch face, so the layout is
 //! computed from the actual dc dimensions instead.
+//! Bumped on every sideload, so the field can prove which build is running.
+const BUILD = 7;
+
 class MetronomeView extends WatchUi.DataField {
 
     private var _config as Config;
@@ -27,6 +30,15 @@ class MetronomeView extends WatchUi.DataField {
     private var _cue as Cue;
     private var _metronome as Metronome;
     private var _cadence as CadenceMonitor;
+
+    // Whether the idle silence has been issued since the timer last stopped.
+    // Re-issuing it every tick would spam playTone for no reason; issuing it
+    // only once per idle period is enough to kill a stale loop.
+    private var _clearedWhileIdle as Boolean = false;
+
+    // What the watch last reported, purely so the field can show it. The
+    // start/stop decision does NOT come from this -- see the timer callbacks.
+    private var _timerState as Number = -1;
 
     // Silenced by the runner mid-activity. Distinct from _beating: the timer
     // is still running, cadence is still watched and displayed, we are simply
@@ -71,6 +83,7 @@ class MetronomeView extends WatchUi.DataField {
         var now = System.getTimer();
         var timerState = timerStateOf(info);
 
+        _timerState = timerState;
         stopIfTimerNotRunning(timerState);
 
         _liveCadence = (info has :currentCadence) ? info.currentCadence : null;
@@ -227,10 +240,21 @@ class MetronomeView extends WatchUi.DataField {
     //! actively silenced rather than left to expire.
     private function stopIfTimerNotRunning(timerState as Number) as Void {
         if (timerState == Activity.TIMER_STATE_ON) {
+            _clearedWhileIdle = false;
             return;
         }
-        if (_beating || _metronome.isArmed()) {
+
+        if (_beating) {
             endBeating();
+        }
+
+        // Once per idle period, silence the firmware unconditionally. Not
+        // guarded by _metronome.isArmed(), because the loop that needs killing
+        // may have been armed by a PREVIOUS instance of this field, which this
+        // one has no record of.
+        if (!_clearedWhileIdle) {
+            _clearedWhileIdle = true;
+            _metronome.forceSilence(_config);
         }
     }
 
@@ -333,6 +357,17 @@ class MetronomeView extends WatchUi.DataField {
     //! The target can change during a run via the lap button, so it has to be
     //! visible rather than something you set once and forget.
     private function footer() as String {
+        // Before the activity starts, show what the watch is actually
+        // reporting. The field beating early has been chased twice on guesses
+        // about this value; now it is simply visible. BUILD is bumped whenever
+        // a new .prg is sideloaded, so there is never any doubt about which
+        // build is running.
+        if (!_beating) {
+            return "b" + BUILD.format("%d")
+                 + " ts" + _timerState.format("%d")
+                 + (_metronome.isArmed() ? " ARM" : "");
+        }
+
         var target = WatchUi.loadResource(Rez.Strings.LabelTarget) as String;
         if (_muted) {
             target += " " + (WatchUi.loadResource(Rez.Strings.LabelOff) as String);

@@ -61,6 +61,21 @@ class Metronome {
         _armedUntilMs = 0;
     }
 
+    //! Silence the firmware whether or not THIS instance armed it.
+    //!
+    //! An arming outlives the app that made it, so a loop started by a previous
+    //! run of the data field is still playing while a fresh instance sits there
+    //! with _armed == false, believing there is nothing to stop. That is
+    //! exactly what happened on a real watch: an old build armed for ten
+    //! minutes and the beat carried on into the next activity, seemingly
+    //! starting "as soon as Run was selected". Guarding the silence behind our
+    //! own bookkeeping is the bug; this does not.
+    public function forceSilence(config as Config) as Void {
+        _cue.silenceTone(config);
+        _armed = false;
+        _armedUntilMs = 0;
+    }
+
     //! Called when the runner sets off, or resumes.
     public function start(nowMs as Number, config as Config) as Void {
         _grid.restart(nowMs);

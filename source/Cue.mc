@@ -119,8 +119,11 @@ class Cue {
     }
 
     //! Replace the looping profile with a moment of silence, which is the only
-    //! way to stop it. Used on pause and on stop -- otherwise the firmware
-    //! would happily keep beating for the rest of the arming window.
+    //! way to stop it.
+    //!
+    //! Deliberately does NOT check config.wantsTone(): this has to be able to
+    //! stop a loop armed by a PREVIOUS run of this app, possibly under
+    //! different settings, which this instance knows nothing about.
     public function silenceTone(config as Config) as Void {
         if (!_hasTone || !_hasToneProfile) { return; }
         try {
