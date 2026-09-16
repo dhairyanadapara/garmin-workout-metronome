@@ -57,7 +57,7 @@ Data field settings **cannot be edited on the watch** — Garmin does not allow 
 |---|---|---|
 | Target cadence | 170 | steps per minute, 100–220 |
 | Beat on | Every step | or every other / every 4th step |
-| Beat using | Tone and vibration | or either alone |
+| Beat using | **Tone only** | or vibration, or both |
 | Off-target alert | On | fires when smoothed cadence drifts outside the band |
 | Alert band | 5% | |
 | Alert delay | 3 s | seconds off target before it fires |
@@ -66,7 +66,22 @@ Data field settings **cannot be edited on the watch** — Garmin does not allow 
 | Lap step | 5 spm | how much each LAP press adds |
 | Lowest / highest cadence | 160 / 180 | the range the lap button cycles through |
 
-For a sideloaded app the settings only appear in Connect Mobile once the watch has synced, which can take a few minutes after install.
+### Sideloaded apps usually have NO settings screen
+
+A manually copied `.prg` generally does **not** get a Settings entry in Garmin
+Connect Mobile. The phone app takes the settings manifest from the store
+listing, and a sideload has none. Once the app is published and installed the
+normal way, settings appear as usual.
+
+Until then there are two ways to configure it:
+
+- **The lap button**, which reaches target cadence and silencing during a run
+  (see below). This is the only on-watch control a data field can have.
+- **Rebuild with different defaults.** `resources/settings/properties.xml` holds
+  every default; change one and run `toolsuild.cmd device`. For a sideload
+  those defaults *are* the configuration.
+
+Current baked defaults: **170 spm, tone only** (no vibration).
 
 ## Controlling it during a run: the LAP button
 

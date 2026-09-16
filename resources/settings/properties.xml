@@ -2,11 +2,17 @@
 <!--
   Defaults for every setting. These keys are read by Config.mc. Keep the ids
   and the types in sync with source/Config.mc and settings.xml.
+
+  These matter more than usual right now: a SIDELOADED Connect IQ app does not
+  reliably get a Settings entry in Garmin Connect Mobile, because the phone app
+  takes the settings manifest from the store listing. Until this is published,
+  the defaults baked in here ARE the configuration, apart from what the lap
+  button can reach (target cadence and silencing).
 -->
 <properties>
     <property id="targetSpm" type="number">170</property>
     <property id="stepsPerBeat" type="number">1</property>
-    <property id="cueMode" type="number">2</property>
+    <property id="cueMode" type="number">0</property>
 
     <property id="deviationEnabled" type="boolean">true</property>
     <property id="deviationPercent" type="number">5</property>

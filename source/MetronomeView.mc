@@ -21,7 +21,7 @@ import Toybox.WatchUi;
 //! screen down to a quarter of a small round watch face, so the layout is
 //! computed from the actual dc dimensions instead.
 //! Bumped on every sideload, so the field can prove which build is running.
-const BUILD = 9;
+const BUILD = 10;
 
 class MetronomeView extends WatchUi.DataField {
 
