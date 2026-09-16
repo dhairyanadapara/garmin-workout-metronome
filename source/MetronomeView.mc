@@ -21,7 +21,7 @@ import Toybox.WatchUi;
 //! screen down to a quarter of a small round watch face, so the layout is
 //! computed from the actual dc dimensions instead.
 //! Bumped on every sideload, so the field can prove which build is running.
-const BUILD = 7;
+const BUILD = 9;
 
 class MetronomeView extends WatchUi.DataField {
 
@@ -363,9 +363,13 @@ class MetronomeView extends WatchUi.DataField {
         // a new .prg is sideloaded, so there is never any doubt about which
         // build is running.
         if (!_beating) {
+            // Before the activity starts: which build, what the watch reports
+            // for the timer, whether the device has tone profiles at all, and
+            // whether its tones are switched on.
             return "b" + BUILD.format("%d")
                  + " ts" + _timerState.format("%d")
-                 + (_metronome.isArmed() ? " ARM" : "");
+                 + " p" + (_cue.hasToneProfile() ? "1" : "0")
+                 + " s" + (_cue.tonesAudible() ? "1" : "0");
         }
 
         var target = WatchUi.loadResource(Rez.Strings.LabelTarget) as String;
@@ -375,10 +379,14 @@ class MetronomeView extends WatchUi.DataField {
             target += " " + _config.targetSpm.format("%d");
         }
 
+        // While beating, the metronome's own status rides along: ARM when the
+        // firmware is looping, otherwise the reason it is not.
+        target += " " + _metronome.status();
+
         if (_deviation == null) {
             return target;
         }
         var sign = (_deviation > 0) ? "+" : "";
-        return target + "  " + sign + _deviation.format("%d") + "%";
+        return target + " " + sign + _deviation.format("%d") + "%";
     }
 }

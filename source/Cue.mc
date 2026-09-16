@@ -41,6 +41,10 @@ class Cue {
     const ALERT_VIBE_DUTY = 100;
     const ALERT_VIBE_MS = 250;
 
+    // Which precondition stopped the last armBeat(). Surfaced on the field so
+    // "it just does not beep" becomes a specific, answerable fact.
+    private var _armFailure as String = "-";
+
     private var _hasTone as Boolean = false;
     private var _hasToneProfile as Boolean = false;
     private var _hasVibrate as Boolean = false;
@@ -88,14 +92,30 @@ class Cue {
     //! match, is what lets Metronome re-arm without shifting the phase.
     //!
     //! @return true if the firmware accepted it
+    public function lastArmFailure() as String {
+        return _armFailure;
+    }
+
     public function armBeat(intervalMs as Number, leadInMs as Number,
                             repeats as Number, config as Config) as Boolean {
-        if (!config.wantsTone() || !_hasToneProfile || !tonesAudible()) {
+        // Checked separately rather than as one condition, so the field can
+        // report WHICH one failed.
+        if (!config.wantsTone()) {
+            _armFailure = "noTone";      // settings say vibration only
+            return false;
+        }
+        if (!_hasToneProfile) {
+            _armFailure = "noProf";      // device lacks Attention.ToneProfile
+            return false;
+        }
+        if (!tonesAudible()) {
+            _armFailure = "sndOff";      // watch tones are muted
             return false;
         }
 
         var tail = intervalMs - BEAT_MS - leadInMs;
         if (tail < 0) {
+            _armFailure = "tail";
             // Metronome should never ask for this; refuse rather than emit a
             // profile whose length is not exactly one interval.
             return false;
@@ -112,8 +132,10 @@ class Cue {
 
         try {
             Attention.playTone({ :toneProfile => profile, :repeatCount => repeats });
+            _armFailure = "-";
             return true;
         } catch (e) {
+            _armFailure = "threw";
             return false;
         }
     }

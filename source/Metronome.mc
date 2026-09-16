@@ -46,6 +46,11 @@ class Metronome {
     private var _armedUntilMs as Number = 0;
     private var _armedIntervalMs as Number = 0;
 
+    // Why the last arming attempt did not take. Shown on the field: an app
+    // that is silent for an unknown reason is far harder to diagnose than one
+    // that says which check it failed.
+    private var _lastFailure as String = "-";
+
     public function initialize(grid as BeatGrid, cue as Cue) {
         _grid = grid;
         _cue = cue;
@@ -111,6 +116,12 @@ class Metronome {
         return _armed;
     }
 
+    //! One-word reason the beat is not sounding, for the on-field diagnostic.
+    public function status() as String {
+        if (_armed) { return "ARM"; }
+        return _lastFailure;
+    }
+
     //! Arm only at a moment that cannot damage the rhythm.
     //!
     //! Two conditions, which turn out to be the same condition:
@@ -129,7 +140,8 @@ class Metronome {
         var beatMs = _cue.beatMs();
 
         if (delay > interval - beatMs) {
-            return;     // a beat is sounding; wait for the next wake-up
+            _lastFailure = "wait";   // a beat is sounding; try the next wake-up
+            return;
         }
 
         armNow(nowMs, delay, config);
@@ -148,9 +160,11 @@ class Metronome {
 
         var armed = _cue.armBeat(interval, delay, repeats, config);
         if (!armed) {
+            _lastFailure = _cue.lastArmFailure();
             return;
         }
 
+        _lastFailure = "-";
         _armed = true;
         _armedIntervalMs = interval;
         _armedUntilMs = nowMs + delay + repeats * interval;
